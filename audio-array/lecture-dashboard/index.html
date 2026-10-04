@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>講演ライブノート</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="page-header">
+    <div><p class="eyebrow">MACBOOK · 1 CHANNEL</p><h1>講演ライブノート</h1><p class="intro">聴きながら、いまの論点とつながりをつかむ。</p></div>
+    <div class="connection"><span id="connection-dot" class="status-dot" data-tone="muted"></span><span id="connection-text">接続を確認中</span><small id="observed-at">サーバーの状態を取得しています</small></div>
+  </header>
+  <main>
+    <div id="connection-warning" class="notice warning" role="status" hidden></div>
+    <div id="session-message" class="notice reading-notice" role="status" hidden></div>
+    <section class="setup panel" aria-label="録音の操作">
+      <details id="setup-settings" class="setup-settings"><summary><span id="settings-summary">入力・言語・モデルを確認</span><span class="settings-hint">設定</span></summary>
+      <div class="setup-fields">
+        <label class="device-field">音声入力<select id="device-select"><option value="">入力を確認中…</option></select></label>
+        <button id="devices-button" class="icon-button" type="button" title="音声入力を再取得" aria-label="音声入力を再取得">↻</button>
+        <label>講演の言語<select id="language-select"><option value="auto">自動（日英）</option><option value="en">英語</option><option value="ja">日本語</option></select></label>
+        <label>理解支援<select id="provider-select"><option value="local">ローカルAI</option><option value="off">オフ（原文のみ）</option></select></label>
+      </div>
+      <div class="setup-foot"><details><summary id="model-setting-summary">モデル設定</summary><label>モデル名（空欄で既定）<input id="model-input" type="text" placeholder="サーバーの既定モデル" autocomplete="off" maxlength="100" list="model-options"><datalist id="model-options"></datalist></label></details></div>
+      <p id="cloud-notice" class="cloud-notice" hidden></p>
+      <details id="preflight-details" class="preflight-details" hidden><summary id="preflight-summary">準備確認</summary><p id="preflight-message"></p><ul id="preflight-checks"></ul></details>
+      <details id="agenda-card" class="agenda-card" hidden><summary id="agenda-heading">当日の予定</summary><ol id="agenda-list" class="agenda-list"></ol><p class="section-caption">予定の表示のみ。録音は自動で開始・停止しません。</p></details>
+      </details>
+      <div class="record-actions"><button id="start-button" class="button primary" type="button" disabled><span aria-hidden="true">●</span> 録音を開始</button><button id="stop-button" class="button stop" type="button" disabled>録音を停止</button></div>
+      <p id="setup-hint" class="setup-hint">録音は開始ボタンを押してから始まります。</p>
+      <p id="local-quality-note" class="quality-note">ローカル解析は実験中：訳や話の関係の取り違えが確認されています。</p>
+      <p id="devices-error" class="error-text" hidden></p>
+      <p id="action-message" class="action-message" role="status" hidden></p>
+    </section>
+
+    <section class="pipeline" aria-label="処理の進行">
+      <div class="stage panel"><div class="stage-heading"><h2>01 <span id="capture-label">録音・保存</span></h2><span id="capture-state" class="pill" data-tone="muted">確認中</span></div><div class="stage-value" id="capture-time">—</div><div class="meter" role="meter" id="input-meter" aria-label="入力レベル" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60"><span id="input-meter-fill"></span></div><p id="capture-detail" class="stage-detail">音声入力を待っています</p><p id="capture-error" class="error-text" hidden></p></div>
+      <div class="stage panel"><div class="stage-heading"><h2>02 原文</h2><span id="asr-state" class="pill" data-tone="muted">待機</span></div><div class="stage-value" id="asr-time">—</div><p id="asr-detail" class="stage-detail">認識した音声の位置</p><p id="asr-error" class="error-text" hidden></p><details id="asr-failures" class="failed-intervals" hidden><summary id="asr-failures-summary">未認識の区間</summary><ul id="asr-failures-list"></ul></details></div>
+      <div class="stage panel"><div class="stage-heading"><h2>03 和訳・理解支援</h2><span id="analysis-state" class="pill" data-tone="muted">待機</span></div><div class="stage-value" id="analysis-time">—</div><p id="analysis-detail" class="stage-detail">分析した音声の位置</p><p id="analysis-error" class="error-text" hidden></p><button id="retry-button" class="text-button" type="button" hidden>分析を再試行</button></div>
+    </section>
+
+    <div class="reading-toolbar"><div><h2 id="session-title">ライブの理解支援</h2><p id="session-detail">開始すると、原文と解説がここに届きます。</p></div><div class="reading-actions"><span id="new-count" class="new-count" hidden></span><button id="freeze-button" class="button secondary" type="button" aria-pressed="false" disabled>閲覧を固定</button><button id="latest-button" class="button primary small" type="button" hidden>最新へ戻る</button></div></div>
+    <p id="freeze-notice" class="notice reading-notice" role="status" hidden>表示を固定しています。録音と処理は継続します。</p>
+
+    <div class="reading-grid">
+      <section class="panel transcript-panel" aria-labelledby="transcript-heading"><div class="section-heading"><div><h2 id="transcript-heading">原文</h2><p class="section-caption">自動認識 · グレーは認識が不確かな部分</p></div><span id="line-count" class="count">0件</span></div><div id="transcript" class="transcript" tabindex="0" aria-label="講演の原文"><div id="transcript-empty" class="transcript-empty"><p>まだ原文はありません</p></div></div></section>
+      <div class="understanding-column">
+        <details id="analysis-history" class="panel history-panel" hidden><summary><span id="history-heading">これまでの分析</span><span class="history-hint">選ぶと、その時点の解説を表示</span></summary><p id="history-caption" class="section-caption">画面には最新60件まで表示します。時刻は分析が根拠にした発言の位置です。</p><ol id="history-list" class="history-list" aria-label="分析履歴"></ol></details>
+        <section class="focus panel" aria-labelledby="focus-heading"><div class="section-heading"><h2 id="focus-heading">いまの論点</h2><span class="ai-label">AIの解釈 · 未確認</span></div><p id="headline" class="headline empty">話のまとまりが届くと、いまの論点を表示します。</p><div id="headline-sources" class="sources"></div><details id="analysis-coverage" class="analysis-coverage" hidden><summary id="coverage-summary">参照した発言</summary><p id="analysis-caption" class="section-caption">その時点までの発言をもとに更新します。</p><p id="coverage-explanation">範囲内の全発言を参照した意味ではありません。直近の発言に、必要な過去の根拠を加えた抜粋です。</p><ul id="coverage-list"></ul></details></section>
+        <section class="panel content-panel translation-panel" aria-labelledby="translation-heading"><div class="section-heading"><h2 id="translation-heading">文脈で訳し直し</h2><span id="translation-range" class="count"></span></div><p id="translation-status" class="translation-status" role="status" hidden></p><p id="translation-error" class="error-text" hidden></p><button id="translation-retry-button" class="text-button" type="button" hidden>翻訳を再試行</button><div id="translation-blocks" class="translation-blocks" tabindex="0" aria-label="公開された訳の履歴"></div><p id="translation-empty" class="empty">まとまりの訳が届くと、ここに表示します。</p><p id="translation-caption" class="section-caption"></p></section>
+        <section class="panel content-panel" aria-labelledby="flow-heading"><div class="section-heading"><h2 id="flow-heading">話の流れ</h2></div><ol id="flow-list" class="flow-list"></ol><p id="flow-empty" class="empty">主張と具体例、そのつながりを追います。</p><div class="summary-section"><h3 id="summary-heading">直近の要点</h3><ul id="summary-list" class="summary-list"></ul><p id="summary-empty" class="empty">要約を待っています。</p></div></section>
+        <section class="panel content-panel" aria-labelledby="concepts-heading"><div class="section-heading"><h2 id="concepts-heading">理解のための概念</h2></div><div id="concepts-list" class="concepts-list"></div><p id="concepts-empty" class="empty">講演を理解するために必要な言葉を短く解説します。</p><p class="section-caption">「背景補足」はAIが加えた一般知識で、講演者の発言とは区別します。</p></section>
+      </div>
+    </div>
+  </main>
+  <footer><span id="processing-caption">原音はこのMacに保存</span><span id="model-caption"></span></footer>
+</body>
+</html>

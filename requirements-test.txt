@@ -1,0 +1,2 @@
+# CPU-only tests do not load MLX or require model weights.
+numpy==2.5.3

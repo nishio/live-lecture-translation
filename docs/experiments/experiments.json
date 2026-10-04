@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "record_type": "historical_aggregate",
+  "release_context": "0.9 standalone extraction",
+  "new_experiment_performed_for_publication": false,
+  "source_content_distributed": false,
+  "provenance": "Newly authored aggregates from private historical development reports; no source recording or generated text is included.",
+  "unmeasured_costs": ["development_assistant_usage", "mac_electricity"],
+  "reproduction_limits": [
+    "Private source material and raw request records are not distributed.",
+    "Exact hardware model, operating-system build, and full dependency versions are not provided by these aggregates.",
+    "These measurements were not rerun on the extracted repository."
+  ],
+  "experiments": [
+    {
+      "id": "continuous-translation-replay",
+      "run_count": 1,
+      "input_duration_seconds": 330,
+      "input_kind": "private_recorded_audio_replayed_in_real_time",
+      "asr_reused": true,
+      "new_microphone_capture": false,
+      "cloud_model_historical_label": "gpt-6.1-sol",
+      "conditions": {
+        "translation_interval_seconds": 60,
+        "analysis_interval_seconds": 120,
+        "maximum_simultaneous_cloud_requests": 1,
+        "audio_sent_to_cloud_in_this_trial": false,
+        "translation_target_rule": "nonempty, non-Japanese, not marked uncertain, not already translated"
+      },
+      "measurements": {
+        "source_lines": 64,
+        "eligible_translation_lines": 60,
+        "uncertain_excluded_lines": 4,
+        "translation_blocks": 12,
+        "missing_eligible_lines": 0,
+        "duplicate_target_lines": 0,
+        "translation_requests": 6,
+        "analysis_requests": 4,
+        "translation_request_seconds_median": 10.162,
+        "translation_request_seconds_maximum": 14.453,
+        "tail_lines_processed_after_stop": 3,
+        "confirmed_api_cost_usd": 0.1346125,
+        "unresolved_reservation_usd": 0
+      },
+      "timing_boundary": "Translation request duration; excludes scheduling wait, recognition, and browser rendering.",
+      "estimates": {
+        "executed": false,
+        "method": "Historical linear extrapolation from two near-steady translation requests and two near-steady analysis requests at their respective configured intervals.",
+        "five_hour_api_cost_usd": 7.16145,
+        "six_hour_api_cost_usd": 8.59374
+      },
+      "limits": [
+        "Saved ASR was reused; this does not measure new recognition accuracy or latency.",
+        "Zero missing targets covers eligible recognized lines, not all spoken words.",
+        "A saved-ASR comparison found no major meaning reversal in twelve blocks; no human audio ground truth was supplied.",
+        "Fixed grouping can split unfinished sentences.",
+        "No six-hour real-time run was performed; cost estimates are not guarantees or current price quotes."
+      ]
+    },
+    {
+      "id": "asr-method-comparison",
+      "run_count_per_method": 1,
+      "input_duration_seconds": 330,
+      "input_kind": "one_private_recording_replayed_in_real_time",
+      "section_count": 22,
+      "section_seconds": 15,
+      "p95_method": "nearest_rank_including_initial_section",
+      "new_microphone_capture": false,
+      "conditions": {
+        "local_and_file_context": "each section recognized independently",
+        "streaming_context": "one continuing connection",
+        "streaming_packet_seconds": 0.1,
+        "streaming_commit_seconds": 15,
+        "streaming_input_sample_rate_hz": 24000,
+        "streaming_vad": "disabled",
+        "streaming_requested_delay": "low",
+        "streaming_effective_delay": "unconfirmed"
+      },
+      "methods": [
+        {
+          "id": "local",
+          "historical_label": "MLX Whisper large-v3-turbo",
+          "completed_sections": 22,
+          "section_end_to_final_seconds_median": 0.827,
+          "section_end_to_final_seconds_p95": 0.901,
+          "initial_section_end_to_final_seconds": 11.168,
+          "confirmed_api_cost_usd": 0
+        },
+        {
+          "id": "file",
+          "historical_label": "GPT-Transcribe",
+          "completed_sections": 22,
+          "section_end_to_final_seconds_median": 1.080,
+          "section_end_to_final_seconds_p95": 1.865,
+          "initial_section_end_to_final_seconds": 1.69,
+          "confirmed_api_cost_usd": 0.02475,
+          "unexecuted_six_hour_asr_only_estimate_usd": 1.62
+        },
+        {
+          "id": "streaming",
+          "historical_label": "GPT-Live-Transcribe",
+          "completed_sections": 22,
+          "section_end_to_final_seconds_median": 0.657,
+          "section_end_to_final_seconds_p95": 0.744,
+          "initial_section_end_to_final_seconds": 0.72,
+          "section_start_to_first_partial_seconds_median": 1.058,
+          "connection_preparation_seconds_outside_playback_clock": 0.64,
+          "confirmed_api_cost_usd": 0.09350,
+          "unexecuted_six_hour_asr_only_estimate_usd": 6.12
+        }
+      ],
+      "cost_accounting": {
+        "confirmed_api_cost_usd": 0.11825,
+        "prior_failed_attempt_unresolved_reservation_usd": 0.187,
+        "confirmed_plus_reserved_usd": 0.30525,
+        "prior_failed_attempt_audio_appends": 0,
+        "prior_failed_attempt_audio_commits": 0,
+        "prior_failed_attempt_usage_received": false
+      },
+      "limits": [
+        "Section-end finalization excludes the fifteen-second section wait.",
+        "First partial text is not final text or per-word latency.",
+        "Context differs across methods; this is not an isolated model-only comparison.",
+        "Human reference transcripts, WER, browser rendering, translation, and six-hour operation were not measured.",
+        "Six-hour cost estimates exclude translation and retries.",
+        "This separate online-ASR experiment does not describe normal microphone audio transmission."
+      ]
+    },
+    {
+      "id": "accelerated-capture-storage",
+      "run_count": 1,
+      "input_kind": "repeated_ten_second_synthetic_audio_in_accelerated_stream",
+      "new_microphone_capture": false,
+      "conditions": {
+        "sample_rate_hz": 16000,
+        "channels": 1,
+        "sample_bits": 16,
+        "minimum_spare_disk_gib": 4,
+        "real_time_pacing": false,
+        "path": "native helper output through capture reader, metering, PCM/WAV saving, and callbacks"
+      },
+      "measurements": {
+        "equivalent_audio_seconds": 21600.123,
+        "pcm_frames": 345601968,
+        "raw_pcm_bytes": 691203936,
+        "wav_files": 1441,
+        "final_partial_chunk_frames": 1968,
+        "elapsed_storage_seconds": 47.130,
+        "parent_peak_rss_mb_at_start": 20.2,
+        "parent_peak_rss_mb_at_end": 40.4,
+        "confirmed_api_cost_usd": 0
+      },
+      "integrity_checks": "All WAV file hashes, PCM hashes and slices, frame continuity, timestamps, and callback totals matched.",
+      "limits": [
+        "Equivalent audio duration is not elapsed test duration.",
+        "No real microphone, six-hour clock stability, battery, lid-closed behavior, acoustics, recognition, or cloud-throughput claim.",
+        "A filesystem-blocked reader can delay its own watchdog; automatic I/O-hang recovery is not established."
+      ]
+    },
+    {
+      "id": "recognition-during-cloud-generation",
+      "run_count": 1,
+      "input_duration_seconds": 330,
+      "input_kind": "private_recording_replayed_in_real_time",
+      "asr_reused": false,
+      "new_microphone_capture": false,
+      "measurements": {
+        "sections": 22,
+        "section_seconds": 15,
+        "source_lines": 64,
+        "section_end_to_source_publication_seconds_median": 0.833,
+        "section_end_to_source_publication_seconds_p95": 0.918,
+        "section_end_to_source_publication_seconds_maximum": 3.782,
+        "source_publications_during_one_cloud_request_over_30_seconds": 4
+      },
+      "limits": [
+        "This is an earlier separate trial, not the continuous-translation saved-ASR replay.",
+        "Fifteen-second section waiting and browser rendering are excluded.",
+        "No long-duration microphone or semantic-accuracy guarantee."
+      ]
+    }
+  ]
+}

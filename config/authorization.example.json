@@ -1,0 +1,11 @@
+{
+  "human_approved": false,
+  "destination": "https://api.openai.com/v1/responses",
+  "raw_audio_allowed": false,
+  "allowed_dates": ["YYYY-MM-DD"],
+  "allowed_models": ["gpt-6.1-sol", "gpt-6-luna"],
+  "microphone_date": "YYYY-MM-DD",
+  "microphone_max_seconds": 21600,
+  "daily_budget_usd_by_date": {"YYYY-MM-DD": 0},
+  "replay_sources": []
+}

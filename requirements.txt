@@ -1,0 +1,5 @@
+# Versions observed in the source system used for v0.9.
+numpy==2.5.3
+mlx==0.32.2
+mlx-whisper==0.4.3
+huggingface-hub==2.0.0
