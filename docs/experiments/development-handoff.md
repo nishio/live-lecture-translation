@@ -20,18 +20,31 @@ The saved result reported capture and recognition complete, storage integrity ve
 
 ## Partial live cost observation
 
-A live continuous-translation session had run for approximately 1.006 hours when the following snapshot was collected. Historical translation and analysis intervals were 60 and 120 seconds. All 89 live requests had usage-confirmed costs, and a separate recomputation matched the saved ledger aggregate.
+A live continuous-translation session had run for approximately 1.006 hours when the following snapshot was collected. The historical cloud model label was `gpt-6.1-sol`; translation and analysis intervals were 60 and 120 seconds. All 89 live requests had usage-confirmed costs, and a separate recomputation matched the saved ledger aggregate.
 
 | Observed quantity | Recorded value |
 | --- | ---: |
 | Completed live requests | 89 |
 | Input / output tokens | 245,687 / 51,904 |
+| Cache-read / cache-write tokens (subsets of input) | 0 / 241,530 |
 | Confirmed live API cost | USD 1.131179 |
 | Live unresolved reservations | USD 0 |
 | Recent 30-minute live cost | USD 0.630875 |
 | Recent 30-minute cost converted to hourly rate | USD 1.26175 / hour |
 | Shared daily confirmed cost, including other work | USD 1.9365511 |
 | Shared daily unresolved reservations | USD 0.187 |
+
+The same live snapshot separated the workloads:
+
+| Workload | Completed requests | Input tokens | Output tokens | Confirmed API cost |
+| --- | ---: | ---: | ---: | ---: |
+| Translation | 59 | 101,545 | 19,986 | USD 0.451689 |
+| Analysis | 30 | 144,142 | 31,918 | USD 0.679490 |
+| Total | 89 | 245,687 | 51,904 | USD 1.131179 |
+
+Analysis had fewer requests but greater total expense in this snapshot. This is an observation about these request sizes and outputs, not a universal cost ratio. Input totals include repeated context and instructions. Cache-read and cache-write counts are already included in the input total; they are not additional tokens.
+
+Attribution excluded the ledger keys present before the session, then matched saved payload fingerprints to subsequent ledger entries, including retries. Completion timestamps from successful generation history defined the recent-rate windows. The cost ledger, rather than summed display histories, remained authoritative for confirmed costs and unresolved reservations. No per-request records or identifying hashes are distributed here.
 
 The daily total includes other development work. A live session's cost and an account's shared daily expenditure answer different questions; neither should overwrite the other.
 

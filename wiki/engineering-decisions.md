@@ -40,6 +40,14 @@ Keep usage-confirmed cost, uncertain reservations, and estimates distinct. A fai
 
 Browser authentication also has state. Cookies can be sent to different ports on the same host. Port-specific cookie names prevent accidental overwrites, while offering no port-based secrecy guarantee. Validate actual launch paths and browser access in addition to reading source code.
 
+## Attribute and forecast cost without changing the running session
+
+A shared daily ledger is authoritative for admission, but its change since startup is not necessarily the cost of one lecture: another experiment may share it. Save the request keys present at session start, match the session's saved payload fingerprints to subsequent ledger entries, and retain retry entries rather than counting only the successful history. Distinguish usage-confirmed expense, unresolved reservations, and reused cached results. Use generation completion timestamps to define a recent-rate window; state the window and remaining duration alongside a forecast.
+
+API input totals include repeated instructions and context, so they are not the number of unique words spoken. For the recorded provider's usage schema, cache-read and cache-write counts are subsets of total input. Do not add those counts to input again; apply their respective rates to their portions. Keep translation and analysis costs separate: update frequency alone does not identify the more expensive workload. See the [partial live cost observation](../docs/experiments/development-handoff.md#partial-live-cost-observation).
+
+Admission also needs room for the next request's conservative reservation. A request can be blocked while confirmed expense is still below the configured limit. Report that condition separately from uncertain usage or an authorization error, and do not clear reservations to manufacture headroom. Compare a recent-rate projection with an explicitly described planning scenario; a chosen margin is not a statistical upper bound or proof that a session will finish within budget.
+
 ## Open questions
 
 - What fraction of eligible speech can be translated promptly under sustained high speech density?

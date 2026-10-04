@@ -42,6 +42,8 @@ Usage-confirmed cost and unresolved reservations are different. A request that f
 
 The displayed accounting may include reservations in its committed total. Read the field meanings before subtracting a reservation again. A session's cost is also distinct from total daily spending across all work that shares its ledger.
 
+Admission checks include a conservative reservation for the next request in addition to existing commitments. A new request may therefore be blocked before usage-confirmed expense reaches the configured limit. Preserve unresolved reservations; they are not spare budget. For session attribution and forecasting, see the [cost-accounting method](../wiki/engineering-decisions.md#attribute-and-forecast-cost-without-changing-the-running-session).
+
 The [published experiments](experiments/README.md) report historical costs under their recorded methods and request sizes. They are not current pricing documentation or a promise that another session will fit the same amount. Model capability, available quota, and pricing must be checked for the account used to run a new experiment.
 
 Make configuration changes between sessions and check that the runtime and authorization agree before capture begins. Retain the source session when cloud processing fails; local audio and recognition can still be valuable.

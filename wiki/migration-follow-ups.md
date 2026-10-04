@@ -21,6 +21,12 @@ These are integration requirements distilled from the comparison experiment, not
 4. Distinguish requested settings from values confirmed by the server. An omitted echo leaves the effective value unverified.
 5. Pace packets against the source clock and avoid future-sample look-ahead when resampling. Keep failed requests and usage-unconfirmed reservations in the accounting state.
 
+## Field feedback: proper-name recognition
+
+An operator reported frequent proper-name misrecognitions during a live event and explicitly prioritized keeping the existing system running. No affected name, correct spelling, source position, or error count was supplied in that feedback. Treat it as a qualitative report requiring investigation, not a measured error rate or proof that ASR rather than translation introduced the error. This report did not trigger a recognizer change, retranscription, or automatic correction.
+
+A future evaluation should distinguish candidate vocabulary supplied before recognition from correction after recognition. Establish examples and authoritative spellings first. Keep the original ASR, proposed correction, and evidence for any accepted correction separately; do not silently map an unclear word to a plausible familiar name. Use publishable fixtures for public regression tests. No correction feature or quality improvement is claimed here.
+
 ## Additional evidence preserved
 
 [Development handoff measurements](../docs/experiments/development-handoff.md) records content-free aggregates from an older pre-event audit and a partial live cost observation. Those measurements are historical evidence of their own source versions. They do not add a clean-install result or a full-event success claim to v0.9.
