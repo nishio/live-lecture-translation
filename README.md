@@ -1,5 +1,11 @@
 # live-lecture-translation
 
+[English](README.md) | [日本語](README.ja.md)
+
+**The goal is to augment people's ability to understand lectures in another language, in real time.** For people whose first language is not English, following an English lecture takes additional cognitive resources compared with listening in their native language. AI should help with that language burden so that more attention remains for understanding the speaker's ideas.
+
+We design for use while listening: support should be easy to scan, its source easy to check, and earlier points easy to revisit. The measure of success is whether the listener can follow the lecture with less effort.
+
 Live English-to-Japanese lecture translation and notes from a Mac microphone. Audio capture and speech recognition run locally; optional cloud text processing builds continuous Japanese translations, key points, and explanations linked to the recognized speech.
 
 **Version 0.9 is a standalone extraction of an existing application.** It preserves the continuous-translation design while separating installation, configuration, and development from the original project. Historical experiment summaries are included; recordings, transcripts, translations, API responses, and screenshots from those experiments are not distributed.
@@ -44,6 +50,22 @@ Audio remains on the Mac in the normal microphone workflow; recognized text and 
 
 After recording, use the dashboard's stop button and wait for saving and remaining recognition, translation, and final analysis to finish. Keep the Mac powered and awake during capture. Closing the terminal is not equivalent to a completed recording session.
 
+## Cost by lecture duration
+
+Local recording and MLX Whisper recognition do not incur an API charge. Cloud translation and analysis do. In one [historical live observation](docs/experiments/development-handoff.md#partial-live-cost-observation), their combined usage-confirmed cost was USD 0.630875 over a recent 30-minute window, equivalent to USD 1.26175 per hour. That run used the historical `gpt-6.1-sol` configuration with translation every nominal 60 seconds and analysis every nominal 120 seconds.
+
+The following estimates assume that same rate continues: `estimated USD = 1.26175 × audio minutes / 60`, rounded to cents.
+
+| Lecture audio duration | Estimated cloud translation + analysis cost (USD) |
+| --- | ---: |
+| 10 minutes | 0.21 |
+| 30 minutes | 0.63 |
+| 1 hour | 1.26 |
+| 90 minutes | 1.89 |
+| 6 hours | 7.57 |
+
+These rows are extrapolations from a partial historical session, not measured runs of each length or current price quotes. Audio length alone does not determine cost: model pricing, speech density, context, output length, scheduling, and retries matter. The table includes no separate allowance for startup or final processing, failed requests, unresolved reservations, or other work sharing the daily budget. Development-assistant usage and Mac electricity were not measured. Use [cloud configuration](docs/cloud-configuration.md) to set a spending limit; this estimate does not guarantee completion within that limit.
+
 ## How the pipeline fits together
 
 ```text
@@ -74,6 +96,8 @@ Version 0.9 is an experimental release:
 - Cloud costs depend on transcript density, context, output length, model, and retries. Published cost extrapolations are historical estimates, not current pricing or spending guarantees.
 
 See [known limitations and the 0.9 boundary](docs/release-0.9.md).
+
+Later [v0.9 field feedback and planned improvements](wiki/migration-follow-ups.md#field-feedback-proper-name-recognition) cover proper names, experiments with user-supplied audio, cost visibility, and easier access to source text and earlier points. These are follow-ups, not fixes included in the v0.9.0 baseline.
 
 ## Repository guide
 

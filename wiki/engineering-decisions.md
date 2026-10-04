@@ -8,6 +8,12 @@ The standalone repository owns future Mac lecture application code and reusable 
 
 A source repository migration and an operational cutover are separate actions. Existing recording sessions and private evidence stay where they are until saving and remaining processing are confirmed complete. Keep v0.9.0 as the extracted comparison baseline. Preserve additional work as explicit follow-ups without implying that it is already active; see [collected migration follow-ups](migration-follow-ups.md).
 
+## Product purpose: understanding with limited attention
+
+The purpose is to augment real-time understanding of lectures in another language. Following an English lecture in a non-native language consumes cognitive resources beyond understanding its ideas. AI support should reduce that language burden and leave attention available for the speaker. The English and Japanese READMEs state this purpose.
+
+Evaluate the listener's effort as well as processing throughput: can they see the supporting text without opening each source ID, revisit the previously displayed point, and return to the current view without losing their place? Stable source IDs remain necessary for provenance, but the reading interface should surface their content. Distinguish a topic or question under discussion (論点) from a proposition attributed to the speaker (主張); changing a heading alone does not establish that the generated content meets the latter contract. See the [v0.9 usability feedback](migration-follow-ups.md#field-feedback-understanding-with-limited-attention) for proposed checks, which have not yet been validated in use.
+
 ## 1. Preserve evidence independently of interpretation
 
 Audio storage, speech recognition, translation, and understanding support are independent responsibilities. A slow or failed downstream request must not withhold new source speech or intentionally stop capture. Verify input reception and confirmed storage, rather than interpreting a running process or a successful start request as evidence of a good recording.
