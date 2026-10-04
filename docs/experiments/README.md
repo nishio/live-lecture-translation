@@ -71,6 +71,10 @@ An earlier 330-second real-time replay exercised local recognition alongside a s
 
 Section completion to source publication measured median 0.833 seconds, p95 0.918 seconds, and maximum 3.782 seconds. The 15-second section wait and browser rendering were separate. This supports the claim that cloud generation need not block source publication. It is a different experiment from the continuous-translation trial that reused saved recognition, and their timing figures must not be merged.
 
+## Additional handoff records
+
+[Development handoff measurements](development-handoff.md) preserves a separate historical pre-event audit and a partial live cost snapshot found while consolidating related development work. These supplemental records are not included in the original four-experiment JSON/CSV bundle and are not final event results.
+
 ## Costs and absent measurements
 
 All currency values are historical USD amounts or estimates. A confirmed amount came from recorded API usage; an unresolved reservation is not a confirmed charge. The local ASR and synthetic capture trials made no paid API request for their local processing, but that does not make the whole workflow free.

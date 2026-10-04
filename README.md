@@ -4,6 +4,8 @@ Live English-to-Japanese lecture translation and notes from a Mac microphone. Au
 
 **Version 0.9 is a standalone extraction of an existing application.** It preserves the continuous-translation design while separating installation, configuration, and development from the original project. Historical experiment summaries are included; recordings, transcripts, translations, API responses, and screenshots from those experiments are not distributed.
 
+This is the canonical development home for the Mac lecture application. Future code changes, experiments, field feedback, and reusable lessons belong here; start with the [development wiki](wiki/index.md). The original device-specific project remains separate. Moving development here does not switch an already running recording session.
+
 ## What it does
 
 - Records a selected Mac audio input as 16 kHz mono PCM and split WAV files.

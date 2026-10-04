@@ -2,6 +2,10 @@
 
 Read README.md, docs/architecture.md, and wiki/index.md before changing behavior.
 
+This repository is the canonical home for future Mac lecture application code, experiments, field feedback, and reusable implementation knowledge. Keep new development here. Device-specific Android recording, ADB/Wi-Fi retrieval, multichannel processing, and the original reading/Vision project remain in the originating project.
+
+Development migration does not authorize a runtime cutover. Preserve any existing event application until recording and remaining processing are confirmed complete. The v0.9.0 tag remains the baseline; later changes belong to later commits. See wiki/migration-follow-ups.md for collected work that has not been applied.
+
 - v0.9.0 is the extracted baseline. Record later field feedback separately and implement it in subsequent versions.
 - Keep capture, ASR, translation, and analysis independently observable. A stop request is not proof of completion.
 - Never commit recordings, transcripts, translations, summaries, API payloads, response caches, credentials, token-bearing URLs, or screenshots of real sessions.

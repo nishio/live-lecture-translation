@@ -2,6 +2,12 @@
 
 This page distills reusable lessons from development. It contains no source speech or generated lecture content. Historical measurements are in [the experiment notes](../docs/experiments/README.md); the current implementation is described in [architecture](../docs/architecture.md).
 
+## Development ownership and runtime continuity
+
+The standalone repository owns future Mac lecture application code and reusable engineering knowledge. Device-specific recording, retrieval, multichannel work, and reading/Vision development stay in the originating project. File new lessons into this wiki rather than maintaining parallel copies in the old wiki.
+
+A source repository migration and an operational cutover are separate actions. Existing recording sessions and private evidence stay where they are until saving and remaining processing are confirmed complete. Keep v0.9.0 as the extracted comparison baseline. Preserve additional work as explicit follow-ups without implying that it is already active; see [collected migration follow-ups](migration-follow-ups.md).
+
 ## 1. Preserve evidence independently of interpretation
 
 Audio storage, speech recognition, translation, and understanding support are independent responsibilities. A slow or failed downstream request must not withhold new source speech or intentionally stop capture. Verify input reception and confirmed storage, rather than interpreting a running process or a successful start request as evidence of a good recording.

@@ -1,0 +1,858 @@
+diff --git a/audio-array/asr_comparison.py b/audio-array/asr_comparison.py
+new file mode 100644
+--- /dev/null
++++ b/audio-array/asr_comparison.py
+@@ -0,0 +1,631 @@
++#!/usr/bin/env python3
++"""One-shot, scope-pinned ASR replay comparison; never records or plays audio.
++
++Local/file modes release each complete 15-second WAV at its replay deadline.
++Realtime sends only elapsed 100 ms packets, and commits every 15 seconds.
++The runner is an experiment, not a production capture or transcription service.
++Raw text/audio/API events belong only under ignored results/event-audio.
++No automatic retries, model downloads, fallback, or production configuration edits.
++"""
++from __future__ import annotations
++
++import argparse
++import base64
++from contextlib import contextmanager
++from datetime import datetime, timezone
++from decimal import Decimal, ROUND_CEILING
++import hashlib
++import io
++import json
++import math
++import os
++from pathlib import Path
++import re
++import threading
++import time
++from urllib import error, request
++import wave
++
++import event_insights_cloud as cloud
++
++ROOT = Path(__file__).resolve().parents[1]
++FILE_URL = "https://api.openai.com/v1/audio/transcriptions"
++REALTIME_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
++MODELS = {"local": "local-whisper", "file": "gpt-transcribe", "realtime": "gpt-live-transcribe"}
++RATES = {"gpt-transcribe": Decimal("0.0045"), "gpt-live-transcribe": Decimal("0.017")}
++MAX_CAP = Decimal("0.50")
++MAX_RESPONSE_BYTES = 4 * 1024 * 1024
++PRICING_DATE = "2026-10-04"
++
++
++class TrialError(RuntimeError):
++    """Only fixed, secret-free explanations may be used in this exception."""
++
++
++def digest(raw):
++    return hashlib.sha256(raw).hexdigest()
++
++
++def canonical(value):
++    return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()
++
++
++def now():
++    return datetime.now(timezone.utc).isoformat()
++
++
++def save(path, value):
++    cloud._atomic_json(Path(path), value)
++
++
++def load_json(path):
++    raw = Path(path).read_bytes()
++    if len(raw) > 1024 * 1024:
++        raise TrialError("Manifest or authorization is too large.")
++    return raw, json.loads(raw, object_pairs_hook=cloud._unique_budget_fields,
++                           parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
++
++
++def read_chunk(chunk):
++    raw = Path(chunk["path"]).read_bytes()
++    if digest(raw) != chunk["sha256"]:
++        raise TrialError("Pinned source WAV changed.")
++    with wave.open(io.BytesIO(raw)) as stream:
++        if (stream.getframerate(), stream.getnchannels(), stream.getsampwidth(),
++                stream.getcomptype(), stream.getnframes()) != (16000, 1, 2, "NONE", chunk["frames"]):
++            raise TrialError("Source format or frame count differs from manifest.")
++        pcm = stream.readframes(chunk["frames"])
++        if len(pcm) != chunk["frames"] * 2:
++            raise TrialError("Truncated source PCM.")
++    return raw, pcm
++
++
++def load_manifest(path, pin):
++    raw, manifest = load_json(path)
++    if not re.fullmatch(r"[0-9a-f]{64}", pin) or digest(raw) != pin:
++        raise TrialError("Manifest hash differs from the authorized pin.")
++    if (manifest.get("schema_version") != 1 or manifest.get("sample_rate") != 16000
++            or manifest.get("language") != "en" or manifest.get("chunk_seconds") != 15
++            or manifest.get("models") != list(MODELS.values())
++            or manifest.get("realtime") != {"sample_rate": 24000, "packet_ms": 100, "delay": "low"}
++            or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", manifest.get("experiment_id", ""))):
++        raise TrialError("Unapproved experiment configuration.")
++    chunks = manifest.get("chunks")
++    if not isinstance(chunks, list) or not 1 <= len(chunks) <= 40:
++        raise TrialError("Experiment requires 1 to 40 complete 15-second chunks.")
++    seen = set()
++    previous = None
++    for chunk in chunks:
++        if (not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", chunk.get("id", ""))
++                or chunk["id"] in seen or chunk.get("frames") != 240000
++                or type(chunk.get("source_start_frame")) is not int
++                or type(chunk.get("source_end_frame")) is not int
++                or chunk["source_start_frame"] < 0
++                or chunk["source_end_frame"] - chunk["source_start_frame"] != chunk["frames"]
++                or (previous is not None and chunk["source_start_frame"] != previous)
++                or not Path(chunk.get("path", "")).is_absolute()
++                or not re.fullmatch(r"[0-9a-f]{64}", chunk.get("sha256", ""))):
++            raise TrialError("Invalid, duplicate, or noncontiguous chunk.")
++        read_chunk(chunk)
++        seen.add(chunk["id"])
++        previous = chunk["source_end_frame"]
++    return manifest
++
++
++class Scope:
++    def __init__(self, manifest_path, pin, authorization_path):
++        self.manifest_path, self.pin = Path(manifest_path), pin
++        self.path = Path(authorization_path)
++        self.manifest = load_manifest(manifest_path, pin)
++        self.experiment_id = self.manifest["experiment_id"]
++
++    def verify(self, model):
++        if digest(self.manifest_path.read_bytes()) != self.pin:
++            raise TrialError("Manifest changed during the trial.")
++        raw, auth = load_json(self.path)
++        cap = Decimal(str(auth.get("experiment_cap_usd", "NaN")))
++        dates = auth.get("allowed_dates", [])
++        if (auth.get("schema_version") != 1 or auth.get("human_approved") is not True
++                or auth.get("raw_audio_allowed") is not True
++                or auth.get("manifest_sha256") != self.pin
++                or auth.get("experiment_id") != self.experiment_id
++                or auth.get("allowed_models") != list(RATES)
++                or auth.get("destinations") != [FILE_URL, REALTIME_URL]
++                or not isinstance(dates, list) or cloud._day() not in dates
++                or not cap.is_finite() or not 0 < cap <= MAX_CAP
++                or model not in MODELS.values()):
++            raise TrialError("Audio scope, model, date, destination, or cap is not authorized.")
++        return int(cap * cloud.NANODOLLARS), digest(raw)
++
++
++def duration_cost(model, seconds):
++    seconds = Decimal(str(seconds))
++    if not seconds.is_finite() or seconds < 0:
++        raise TrialError("Invalid billable audio duration.")
++    return int((seconds * RATES[model] / 60 * cloud.NANODOLLARS).to_integral_value(rounding=ROUND_CEILING))
++
++
++class Budget:
++    """Share the existing atomic daily ledger without reinterpreting text scope."""
++    def __init__(self, scope):
++        self.scope = scope
++
++    def reserve(self, model, identity, seconds):
++        cap, auth_pin = self.scope.verify(model)
++        # Two times duration price leaves room for duration rounding. Unknown
++        # charges remain fully reserved; they never become an asserted zero.
++        amount = duration_cost(model, math.ceil(seconds) * 2)
++        key = digest(canonical(["asr-comparison-v1", self.scope.pin, model, identity]))
++        day = cloud._day()
++        with cloud._locked_ledger() as ledger:
++            if key in ledger["requests"]:
++                raise TrialError("This ASR request was already attempted; automatic replay is forbidden.")
++            experiment_spent = sum(r["charged_nanodollars"] for r in ledger["requests"].values()
++                if r.get("kind") == "asr-comparison-v1" and r.get("experiment_id") == self.scope.experiment_id)
++            if experiment_spent + amount > cap or cloud._spent(ledger, day) + amount > cloud._budget(day):
++                raise TrialError("Experiment or shared daily budget would be exceeded.")
++            ledger["requests"][key] = {"day": day, "state": "reserved", "kind": "asr-comparison-v1",
++                "experiment_id": self.scope.experiment_id, "manifest_sha256": self.scope.pin,
++                "scope_authorization_sha256": auth_pin, "model": model, "identity": identity,
++                "reserved_nanodollars": amount, "charged_nanodollars": amount,
++                "planned_audio_seconds": seconds, "duration_estimate_nanodollars": duration_cost(model, seconds),
++                "pricing_date": PRICING_DATE, "created_at": now()}
++            cloud._atomic_json(cloud.STATE_DIR / "cloud-budget.json", ledger)
++        return key
++
++    def settle(self, key, *, usage=None, completed=False, returned_model=None):
++        exceeded = False
++        with cloud._locked_ledger() as ledger:
++            row = ledger["requests"][key]
++            if row["state"] == "completed":
++                return dict(row)
++            actual = None
++            if (completed and isinstance(usage, dict) and usage.get("type") == "duration"
++                    and type(usage.get("seconds")) in (int, float)
++                    and (returned_model is None or returned_model == row["model"])):
++                actual = duration_cost(row["model"], usage["seconds"])
++            if actual is not None:
++                row.update(state="completed", charged_nanodollars=actual, usage=usage,
++                           actual_cost_basis="API reported duration times published model rate")
++                if actual > row["reserved_nanodollars"]:
++                    row["reservation_exceeded"] = exceeded = True
++            else:
++                row.update(state="completed_usage_unknown" if completed else "failed", usage=usage,
++                           actual_cost_basis=None)
++            row["updated_at"] = now()
++            cloud._atomic_json(cloud.STATE_DIR / "cloud-budget.json", ledger)
++            result = dict(row)
++        if exceeded:
++            raise TrialError("Known API charge exceeded its reservation; charge recorded and trial stopped.")
++        return result
++
++
++@contextmanager
++def key_source(path):
++    old_path, old_env = cloud.DOTENV_PATH, os.environ.pop("OPENAI_API_KEY", None)
++    cloud.DOTENV_PATH = Path(path).expanduser().resolve()
++    try:
++        value = cloud._api_key()
++        if not value:
++            raise TrialError("The specified key file contains no API key.")
++        yield value
++    finally:
++        cloud.DOTENV_PATH = old_path
++        if old_env is not None:
++            os.environ["OPENAI_API_KEY"] = old_env
++
++
++def safe_error(exc):
++    return {"type": type(exc).__name__, "message": str(exc) if isinstance(exc, TrialError)
++            else "Trial stopped; inspect private raw events. No automatic retry."}
++
++
++class Journal:
++    def __init__(self, path, origin):
++        self.stream = Path(path).open("x", encoding="utf-8")
++        self.origin = origin
++        self.lock = threading.Lock()
++
++    def write(self, direction, payload):
++        row = {"at": now(), "elapsed_seconds": time.monotonic() - self.origin,
++               "direction": direction, "event": payload}
++        with self.lock:
++            self.stream.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
++            self.stream.flush()
++        return row
++
++    def close(self):
++        self.stream.close()
++
++
++def timing(start, end, first, final, request_started):
++    return {"audio_start_seconds": start, "audio_end_seconds": end,
++            "request_started_seconds": request_started, "first_text_seconds": first,
++            "final_text_seconds": final,
++            "first_from_chunk_start_seconds": None if first is None else first - start,
++            "first_from_chunk_end_seconds": None if first is None else first - end,
++            "final_from_chunk_end_seconds": None if final is None else final - end,
++            "request_to_first_seconds": None if first is None else first - request_started,
++            "request_to_final_seconds": None if final is None else final - request_started}
++
++
++def wait_until(origin, deadline):
++    while True:
++        remaining = origin + deadline - time.monotonic()
++        if remaining <= 0:
++            return
++        time.sleep(min(remaining, .1))
++
++
++def sse_events(response, raw_stream):
++    data, total = [], 0
++    for raw in response:
++        total += len(raw)
++        if total > MAX_RESPONSE_BYTES:
++            raise TrialError("API response exceeded the bounded event log size.")
++        raw_stream.write(raw)
++        raw_stream.flush()
++        line = raw.decode("utf-8").rstrip("\r\n")
++        if not line:
++            if data:
++                body = "\n".join(data)
++                if body != "[DONE]":
++                    yield json.loads(body)
++                data = []
++        elif line.startswith("data:"):
++            data.append(line[5:].lstrip(" "))
++    if data:
++        body = "\n".join(data)
++        if body != "[DONE]":
++            yield json.loads(body)
++
++
++def multipart(wav, chunk_id):
++    boundary = "asr-comparison-" + digest(wav)[:32]
++    fields = {"model": MODELS["file"], "languages[]": "en", "stream": "true", "response_format": "json"}
++    parts = []
++    for name, value in fields.items():
++        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
++    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{chunk_id}.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode())
++    parts.extend([wav, f"\r\n--{boundary}--\r\n".encode()])
++    return b"".join(parts), boundary, fields
++
++
++def transcribe_http(chunk, key, destination, origin, opener=None):
++    wav, _ = read_chunk(chunk)
++    body, boundary, fields = multipart(wav, chunk["id"])
++    (destination / "request.multipart").write_bytes(body)
++    save(destination / "request.json", {"url": FILE_URL, "fields": fields,
++        "source_sha256": chunk["sha256"], "body_sha256": digest(body), "body_bytes": len(body),
++        "content_type": "multipart/form-data; boundary=" + boundary})
++    req = request.Request(FILE_URL, data=body, headers={"Authorization": "Bearer " + key,
++        "Content-Type": "multipart/form-data; boundary=" + boundary, "Accept": "text/event-stream"})
++    opener = opener or request.build_opener(request.ProxyHandler({}), cloud._NoRedirect())
++    first = final = done = None
++    events = Journal(destination / "events.jsonl", origin)
++    started = time.monotonic() - origin
++    try:
++        with opener.open(req, timeout=90) as response, (destination / "response.sse").open("xb") as raw:
++            save(destination / "response-metadata.json", {"status": response.status,
++                "content_type": response.headers.get("Content-Type"), "request_id": response.headers.get("x-request-id")})
++            for event in sse_events(response, raw):
++                elapsed = events.write("received", event)["elapsed_seconds"]
++                kind = event.get("type")
++                if kind == "error" or "error" in event:
++                    raise TrialError("API returned a transcription error; reservation retained.")
++                if kind in ("transcript.text.delta", "transcript.text.done"):
++                    text = event.get("delta" if kind.endswith("delta") else "text", "")
++                    if not isinstance(text, str):
++                        raise TrialError("Invalid transcript text event.")
++                    if text.strip() and first is None:
++                        first = elapsed
++                    if kind == "transcript.text.done":
++                        if done is not None:
++                            raise TrialError("Duplicate final transcript event.")
++                        done, final = event, elapsed
++        if done is None:
++            raise TrialError("Stream ended without a final transcript; reservation retained.")
++        if done.get("model") not in (None, MODELS["file"]):
++            raise TrialError("API explicitly returned a different model; reservation retained and trial stopped.")
++        return {"text": done["text"], "usage": done.get("usage"), "returned_model": done.get("model"),
++                "first": first, "final": final, "request_started": started}
++    except error.HTTPError as exc:
++        (destination / "http-error-body.bin").write_bytes(exc.read(MAX_RESPONSE_BYTES + 1))
++        save(destination / "http-error.json", {"http_status": exc.code})
++        raise TrialError(f"OpenAI transcription returned HTTP {exc.code}; no retry.") from None
++    finally:
++        events.close()
++
++
++def run_chunked(scope, mode, out, state, budget=None, key=None, model_metadata=None):
++    if mode == "local":
++        from lecture_live import LocalTranscriber
++        transcriber = LocalTranscriber(model_metadata)
++    origin = time.monotonic()
++    state.update(replay_origin_at=now(), replay_origin_monotonic=origin)
++    save(out / "state.json", state)
++    for index, chunk in enumerate(scope.manifest["chunks"]):
++        start, end = index * 15, (index + 1) * 15
++        wait_until(origin, end)
++        scope.verify(MODELS[mode])
++        read_chunk(chunk)
++        destination = out / chunk["id"]
++        destination.mkdir()
++        row = {"chunk": chunk, "state": "running"}
++        state["chunks"].append(row)
++        save(out / "state.json", state)
++        reservation = None
++        try:
++            if mode == "local":
++                started = time.monotonic() - origin
++                raw = transcriber(chunk, destination / "response.json", "en")
++                final = time.monotonic() - origin
++                result = {"text": raw["chunks"][0]["raw_result"]["text"], "first": final,
++                          "final": final, "request_started": started}
++            else:
++                reservation = budget.reserve(MODELS[mode], chunk["id"], 15)
++                row["ledger_key"] = reservation
++                save(out / "state.json", state)
++                result = transcribe_http(chunk, key, destination, origin)
++                row["cost"] = budget.settle(reservation, usage=result.get("usage"), completed=True,
++                                             returned_model=result.get("returned_model"))
++            row.update(state="completed", text=result["text"],
++                timing=timing(start, end, result["first"], result["final"], result["request_started"]))
++            read_chunk(chunk)
++        except BaseException as exc:
++            row.update(state="failed", error=safe_error(exc))
++            if reservation:
++                row["cost"] = budget.settle(reservation)
++            raise
++        finally:
++            save(destination / "result.json", row)
++            save(out / "state.json", state)
++
++
++def realtime_config():
++    return {"type": "session.update", "session": {"type": "transcription", "audio": {"input": {
++        "format": {"type": "audio/pcm", "rate": 24000}, "transcription": {
++        "model": MODELS["realtime"], "languages": ["en"], "delay": "low"}, "turn_detection": None}}}}
++
++
++def realtime_rows(events, chunks):
++    """Join out-of-order completions and pre-commit deltas by committed item ID."""
++    committed = [e for e in events if e["event"].get("type") == "input_audio_buffer.committed"]
++    ids = [e["event"].get("item_id") for e in committed]
++    if any(not isinstance(i, str) for i in ids) or len(ids) != len(set(ids)) or len(ids) > len(chunks):
++        raise TrialError("Invalid or duplicate committed item identity.")
++    for index, entry in enumerate(committed):
++        if entry["event"].get("previous_item_id") != (ids[index - 1] if index else None):
++            raise TrialError("Committed item chain differs from the sent audio order.")
++    rows = []
++    for index, item_id in enumerate(ids):
++        matching = [e for e in events if e["event"].get("item_id") == item_id]
++        finals = [e for e in matching if e["event"].get("type") == "conversation.item.input_audio_transcription.completed"]
++        deltas = [e for e in matching if e["event"].get("type") == "conversation.item.input_audio_transcription.delta"
++                  and isinstance(e["event"].get("delta"), str) and e["event"]["delta"].strip()]
++        if len(finals) > 1:
++            raise TrialError("Duplicate completed transcript item.")
++        final = finals[0] if finals else None
++        if final and not isinstance(final["event"].get("transcript"), str):
++            raise TrialError("Completed transcript is not a string.")
++        first = deltas[0]["elapsed_seconds"] if deltas else (final["elapsed_seconds"] if final and final["event"].get("transcript", "").strip() else None)
++        row = {"chunk": chunks[index], "item_id": item_id, "state": "completed" if final else "pending",
++               "text": final["event"].get("transcript") if final else "",
++               "usage": final["event"].get("usage") if final else None,
++               "timing": timing(index * 15, (index + 1) * 15, first,
++                   final["elapsed_seconds"] if final else None, index * 15),
++               "committed_ack_seconds": committed[index]["elapsed_seconds"]}
++        rows.append(row)
++    return rows
++
++
++def resample_pcm(pcm):
++    import numpy as np
++    from scipy.signal import firwin, upfirdn
++    signal = np.frombuffer(pcm, dtype="<i2").astype(np.float64)
++    # A causal FIR, unlike zero-phase resample_poly, never borrows future
++    # source samples across a packet deadline. Group delay is 0.625 ms.
++    taps = firwin(61, 1 / 3, window=("kaiser", 5.0)) * 3
++    converted = upfirdn(taps, signal, up=3, down=2)[:len(signal) * 3 // 2]
++    return np.clip(np.rint(converted), -32768, 32767).astype("<i2").tobytes()
++
++
++def validate_realtime_session(observed):
++    audio = observed.get("audio", {}).get("input", {})
++    transcription = audio.get("transcription") or {}
++    if (observed.get("type") != "transcription" or transcription.get("model") != MODELS["realtime"]
++            or "turn_detection" not in audio or audio["turn_detection"] is not None
++            or audio.get("format") != {"type": "audio/pcm", "rate": 24000}
++            or transcription.get("languages") != ["en"]
++            or ("delay" in transcription and transcription["delay"] != "low")):
++        raise TrialError("Server did not confirm the authorized transcription configuration.")
++    # The live API currently accepts delay but omits it from session.updated.
++    # An absent echo cannot establish which delay was actually applied.
++    return {"requested_delay": "low", "echoed_delay": transcription.get("delay"),
++            "effective_delay_confirmed": "delay" in transcription,
++            "observed_session": observed}
++
++
++def run_realtime(scope, out, state, budget, key, attempt=1):
++    from websockets.sync.client import connect
++    chunks = scope.manifest["chunks"]
++    # Conversion is fixed and complete before starting the replay clock. No
++    # future packet is sent: send deadlines use the end of each audio packet.
++    signals = []
++    for chunk in chunks:
++        _, pcm = read_chunk(chunk)
++        converted = resample_pcm(pcm)
++        if len(converted) != 15 * 24000 * 2:
++            raise TrialError("Resampled PCM frame count differs.")
++        (out / (chunk["id"] + "-24k.pcm")).write_bytes(converted)
++        signals.append(converted)
++    save(out / "resampling.json", {"method": "causal 61-tap Kaiser FIR upfirdn(up=3,down=2), round/clip PCM16",
++        "group_delay_seconds": 0.000625, "boundary_policy": "reset FIR for each fixed 15-second chunk, truncate delayed tail",
++        "source_rate": 16000, "output_rate": 24000,
++        "chunks": [{"id": c["id"], "source_sha256": c["sha256"], "pcm24k_sha256": digest(p)} for c, p in zip(chunks, signals)]})
++    identity = "session" if attempt == 1 else f"session-attempt-{attempt}"
++    reservation = budget.reserve(MODELS["realtime"], identity, len(chunks) * 15)
++    state["ledger_key"] = reservation
++    save(out / "state.json", state)
++    origin = time.monotonic()
++    journal = Journal(out / "events.jsonl", origin)
++    events, receiver_errors = [], []
++    event_lock, stop = threading.Lock(), threading.Event()
++    receiver = None
++    try:
++        with connect(REALTIME_URL, additional_headers={"Authorization": "Bearer " + key},
++                     proxy=None, open_timeout=30, close_timeout=5, max_size=MAX_RESPONSE_BYTES) as ws:
++            def receive():
++                while not stop.is_set():
++                    try:
++                        raw = ws.recv(timeout=.25)
++                    except TimeoutError:
++                        continue
++                    except BaseException as exc:
++                        if not stop.is_set():
++                            receiver_errors.append(exc)
++                        return
++                    try:
++                        event = json.loads(raw)
++                        row = journal.write("received", event)
++                        with event_lock:
++                            events.append(row)
++                        if event.get("type") in ("error", "conversation.item.input_audio_transcription.failed"):
++                            raise TrialError("Realtime server reported an error; no retry.")
++                    except BaseException as exc:
++                        receiver_errors.append(exc)
++                        return
++
++            receiver = threading.Thread(target=receive, daemon=True)
++            receiver.start()
++            config = realtime_config()
++            journal.write("sent", config)
++            ws.send(json.dumps(config))
++            deadline = time.monotonic() + 30
++            while True:
++                if receiver_errors:
++                    raise receiver_errors[0]
++                with event_lock:
++                    updated = next((e for e in events if e["event"].get("type") == "session.updated"), None)
++                if updated:
++                    state["session_confirmation"] = validate_realtime_session(updated["event"]["session"])
++                    break
++                if time.monotonic() > deadline:
++                    raise TrialError("Session configuration was not acknowledged before timeout.")
++                time.sleep(.02)
++            replay_offset = time.monotonic() - origin
++            state.update(replay_origin_at=now(), replay_origin_monotonic=origin + replay_offset,
++                         session_setup_seconds=replay_offset)
++            packet_bytes = 2400 * 2
++            for index, (chunk, pcm) in enumerate(zip(chunks, signals)):
++                scope.verify(MODELS["realtime"])
++                read_chunk(chunk)
++                for offset in range(0, len(pcm), packet_bytes):
++                    packet = pcm[offset:offset + packet_bytes]
++                    packet_end = index * 15 + (offset + len(packet)) / 48000
++                    wait_until(origin, replay_offset + packet_end)
++                    if receiver_errors:
++                        raise receiver_errors[0]
++                    event = {"type": "input_audio_buffer.append", "audio": base64.b64encode(packet).decode("ascii")}
++                    # Full outgoing events stay private; they can reproduce all bytes.
++                    journal.write("sent", {**event, "chunk_id": chunk["id"], "packet_end_seconds": packet_end})
++                    ws.send(json.dumps(event))
++                commit = {"type": "input_audio_buffer.commit", "event_id": "commit-" + chunk["id"]}
++                journal.write("sent", commit)
++                ws.send(json.dumps(commit))
++                with event_lock:
++                    adjusted = [{**e, "elapsed_seconds": e["elapsed_seconds"] - replay_offset} for e in events]
++                state["chunks"] = realtime_rows(adjusted, chunks)
++                state["sent_chunks"] = index + 1
++                save(out / "state.json", state)
++            deadline = time.monotonic() + 90
++            while True:
++                if receiver_errors:
++                    raise receiver_errors[0]
++                with event_lock:
++                    adjusted = [{**e, "elapsed_seconds": e["elapsed_seconds"] - replay_offset} for e in events]
++                state["chunks"] = realtime_rows(adjusted, chunks)
++                if len(state["chunks"]) == len(chunks) and all(r["state"] == "completed" for r in state["chunks"]):
++                    break
++                if time.monotonic() > deadline:
++                    raise TrialError("Timed out waiting for committed final transcripts; reservation retained.")
++                time.sleep(.05)
++            usages = [r["usage"] for r in state["chunks"]]
++            usage = ({"type": "duration", "seconds": sum(u["seconds"] for u in usages)}
++                     if all(isinstance(u, dict) and u.get("type") == "duration" and type(u.get("seconds")) in (int, float) for u in usages) else None)
++            state["cost"] = budget.settle(reservation, usage=usage, completed=True)
++            stop.set()
++    except BaseException:
++        state["cost"] = budget.settle(reservation)
++        raise
++    finally:
++        stop.set()
++        if receiver:
++            receiver.join(timeout=6)
++        journal.close()
++        save(out / "state.json", state)
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--manifest", type=Path, required=True)
++    parser.add_argument("--manifest-sha256", required=True)
++    parser.add_argument("--authorization", type=Path, required=True)
++    parser.add_argument("--mode", choices=MODELS, required=True)
++    parser.add_argument("--out", type=Path, required=True)
++    parser.add_argument("--budget-authorization", type=Path)
++    parser.add_argument("--key-file", type=Path)
++    parser.add_argument("--realtime-attempt", type=int, default=1,
++                        help="Explicit manual attempt identity; failed reservations remain counted. No automatic retries.")
++    parser.add_argument("--model-metadata", type=Path, default=ROOT / "data/event-audio/model-cache/whisper-turbo.json")
++    args = parser.parse_args(argv)
++    if args.realtime_attempt < 1 or (args.mode != "realtime" and args.realtime_attempt != 1):
++        raise TrialError("Attempt identity applies only to realtime and must be positive.")
++    scope = Scope(args.manifest, args.manifest_sha256, args.authorization)
++    scope.verify(MODELS[args.mode])
++    out = args.out.resolve()
++    if not out.is_relative_to(ROOT / "results/event-audio"):
++        raise TrialError("Raw experiment results must remain under private results/event-audio.")
++    if args.mode != "local":
++        if args.budget_authorization is None or args.key_file is None:
++            raise TrialError("Online modes require separate audio scope, daily budget, and runtime key file.")
++        cloud.configure_budget_authorization(args.budget_authorization)
++    out.mkdir(parents=True, exist_ok=False)
++    state = {"schema_version": 1, "state": "running", "mode": args.mode, "model": MODELS[args.mode],
++             "kind": "saved-audio real-time-paced replay, not live microphone", "pace": 1,
++             "manifest_sha256": scope.pin, "started_at": now(), "chunks": [],
++             "runner_sha256": digest(Path(__file__).read_bytes()), "realtime_attempt": args.realtime_attempt,
++             "limits": ["No microphone capture or browser rendering measured", "One recording and one run per model",
++                        "Chunk-start/end latency is not per-word speech latency", "Unknown API billing stays reserved",
++                        "Realtime retains earlier audio context; independent WAV calls and local ASR do not"]}
++    save(out / "manifest.json", scope.manifest)
++    save(out / "state.json", state)
++    try:
++        if args.mode == "local":
++            run_chunked(scope, args.mode, out, state, model_metadata=args.model_metadata)
++        else:
++            budget = Budget(scope)
++            state["budget_before"] = cloud.budget_status()
++            with key_source(args.key_file) as key:
++                if args.mode == "file":
++                    run_chunked(scope, args.mode, out, state, budget=budget, key=key)
++                else:
++                    run_realtime(scope, out, state, budget, key, attempt=args.realtime_attempt)
++            state["budget_after"] = cloud.budget_status()
++        state["state"] = "completed"
++    except BaseException as exc:
++        state.update(state="failed", error=safe_error(exc))
++    finally:
++        state["finished_at"] = now()
++        save(out / "state.json", state)
++    print(json.dumps({"state": state["state"], "mode": args.mode, "completed_chunks":
++          sum(r.get("state") == "completed" for r in state["chunks"]), "result": str(out / "state.json")}))
++    return 0 if state["state"] == "completed" else 2
++
++
++if __name__ == "__main__":
++    try:
++        raise SystemExit(main())
++    except (TrialError, cloud.CloudError, OSError, ValueError, KeyError, TypeError) as exc:
++        print(json.dumps({"state": "preflight_failed", "error": safe_error(exc)}))
++        raise SystemExit(2)
+diff --git a/audio-array/tests/test_asr_comparison.py b/audio-array/tests/test_asr_comparison.py
+new file mode 100644
+--- /dev/null
++++ b/audio-array/tests/test_asr_comparison.py
+@@ -0,0 +1,217 @@
++import copy
++import hashlib
++import io
++import json
++from pathlib import Path
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++import wave
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++import asr_comparison as trial
++import event_insights_cloud as cloud
++
++
++class ASRComparisonTest(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.root = Path(self.temp.name)
++        self.wav = self.root / "sample.wav"
++        with wave.open(str(self.wav), "wb") as output:
++            output.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
++            output.writeframes(b"\0\0" * 240000)
++        self.chunk = {"id": "chunk-000", "path": str(self.wav), "sha256": trial.digest(self.wav.read_bytes()),
++                      "frames": 240000, "source_start_frame": 0, "source_end_frame": 240000}
++        self.manifest = {"schema_version": 1, "experiment_id": "cpu-test", "sample_rate": 16000,
++            "language": "en", "chunk_seconds": 15, "models": list(trial.MODELS.values()),
++            "realtime": {"sample_rate": 24000, "packet_ms": 100, "delay": "low"}, "chunks": [self.chunk]}
++        self.path = self.root / "manifest.json"
++        self.path.write_bytes(trial.canonical(self.manifest))
++        self.pin = trial.digest(self.path.read_bytes())
++        self.auth = {"schema_version": 1, "human_approved": True, "raw_audio_allowed": True,
++            "manifest_sha256": self.pin, "experiment_id": "cpu-test", "allowed_dates": ["2030-06-01"],
++            "allowed_models": list(trial.RATES), "destinations": [trial.FILE_URL, trial.REALTIME_URL],
++            "experiment_cap_usd": .5}
++        self.authpath = self.root / "authorization.json"
++        self.authpath.write_bytes(trial.canonical(self.auth))
++        for p in (patch.object(cloud, "STATE_DIR", self.root / "ledger"),
++                  patch.object(cloud, "_day", return_value="2030-06-01"),
++                  patch.object(cloud, "_budget", return_value=10_000_000_000)):
++            p.start()
++            self.addCleanup(p.stop)
++        self.scope = trial.Scope(self.path, self.pin, self.authpath)
++        self.budget = trial.Budget(self.scope)
++
++    def test_pinned_manifest_and_source_fail_closed(self):
++        self.assertEqual(len(trial.load_manifest(self.path, self.pin)["chunks"]), 1)
++        self.path.write_bytes(self.path.read_bytes() + b" ")
++        with self.assertRaises(trial.TrialError):
++            self.scope.verify("gpt-transcribe")
++        self.path.write_bytes(trial.canonical(self.manifest))
++        self.wav.write_bytes(self.wav.read_bytes() + b"changed")
++        with self.assertRaises(trial.TrialError):
++            trial.load_manifest(self.path, self.pin)
++
++    def test_audio_scope_cannot_reuse_text_authorization(self):
++        for key, bad in (("raw_audio_allowed", False), ("human_approved", False),
++                         ("allowed_dates", ["2030-05-31"]), ("allowed_models", ["gpt-transcribe"]),
++                         ("destinations", [cloud.API_URL]), ("experiment_cap_usd", .51)):
++            with self.subTest(key=key):
++                changed = {**self.auth, key: bad}
++                self.authpath.write_bytes(trial.canonical(changed))
++                with self.assertRaises(trial.TrialError):
++                    self.budget.reserve("gpt-transcribe", "c1", 15)
++                self.assertFalse((cloud.STATE_DIR / "cloud-budget.json").exists())
++
++    def test_duplicate_requests_and_unknown_usage_retain_reservation(self):
++        key = self.budget.reserve("gpt-transcribe", "c1", 15)
++        result = self.budget.settle(key, completed=True, usage={"type": "tokens", "total_tokens": 100})
++        self.assertEqual(result["state"], "completed_usage_unknown")
++        self.assertEqual(result["charged_nanodollars"], 2_250_000)
++        with self.assertRaises(trial.TrialError):
++            self.budget.reserve("gpt-transcribe", "c1", 15)
++        # A distinct chunk may proceed, still counting the unknown charge.
++        self.budget.reserve("gpt-transcribe", "c2", 15)
++        self.assertEqual(cloud._spent(cloud._load_ledger(), "2030-06-01"), 4_500_000)
++
++    def test_daily_and_experiment_caps_include_other_unknown_requests(self):
++        key = self.budget.reserve("gpt-live-transcribe", "session", 330)
++        self.budget.settle(key)
++        self.auth["experiment_cap_usd"] = .19
++        self.authpath.write_bytes(trial.canonical(self.auth))
++        with self.assertRaises(trial.TrialError):
++            self.budget.reserve("gpt-live-transcribe", "session2", 15)
++        with patch.object(cloud, "_budget", return_value=187_000_001):
++            with self.assertRaises(trial.TrialError):
++                self.budget.reserve("gpt-transcribe", "c2", 15)
++
++    def test_known_duration_cost_and_model_mismatch(self):
++        key = self.budget.reserve("gpt-transcribe", "c1", 15)
++        result = self.budget.settle(key, completed=True, usage={"type": "duration", "seconds": 15})
++        self.assertEqual(result["state"], "completed")
++        self.assertEqual(result["charged_nanodollars"], 1_125_000)
++        self.assertEqual(self.budget.settle(key)["charged_nanodollars"], 1_125_000)
++        key2 = self.budget.reserve("gpt-transcribe", "c2", 15)
++        result = self.budget.settle(key2, completed=True, usage={"type": "duration", "seconds": 15}, returned_model="other")
++        self.assertEqual(result["state"], "completed_usage_unknown")
++
++    def test_known_over_reservation_charge_is_recorded_then_stops(self):
++        key = self.budget.reserve("gpt-transcribe", "c1", 15)
++        with self.assertRaises(trial.TrialError):
++            self.budget.settle(key, completed=True, usage={"type": "duration", "seconds": 60})
++        result = self.budget.settle(key)
++        self.assertEqual(result["charged_nanodollars"], 4_500_000)
++        self.assertTrue(result["reservation_exceeded"])
++
++    def test_sse_partial_final_comments_and_raw_preservation(self):
++        raw = b': heartbeat\n\ndata: {"type":"transcript.text.delta","delta":"Hello"}\n\ndata: {"type":"transcript.text.done","text":"Hello."}\n\ndata: [DONE]\n\n'
++        saved = io.BytesIO()
++        events = list(trial.sse_events(io.BytesIO(raw), saved))
++        self.assertEqual([e["type"] for e in events], ["transcript.text.delta", "transcript.text.done"])
++        self.assertEqual(saved.getvalue(), raw)
++
++    def test_file_request_fields_are_fixed_and_raw_wav_preserved(self):
++        wav = self.wav.read_bytes()
++        body, boundary, fields = trial.multipart(wav, "chunk-000")
++        self.assertEqual(fields["languages[]"], "en")
++        self.assertNotIn("language", fields)
++        self.assertEqual(fields["model"], "gpt-transcribe")
++        self.assertEqual(fields["stream"], "true")
++        self.assertIn(wav, body)
++        self.assertTrue(body.endswith(("--" + boundary + "--\r\n").encode()))
++
++    @staticmethod
++    def event(t, kind, **fields):
++        return {"elapsed_seconds": t, "event": {"type": kind, **fields}}
++
++    def test_realtime_matches_precommit_deltas_and_reversed_final_order(self):
++        events = [self.event(1, "conversation.item.input_audio_transcription.delta", item_id="a", delta="Hello"),
++                  self.event(15.1, "input_audio_buffer.committed", item_id="a", previous_item_id=None),
++                  self.event(30.1, "input_audio_buffer.committed", item_id="b", previous_item_id="a"),
++                  self.event(30.2, "conversation.item.input_audio_transcription.completed", item_id="b", transcript="Second."),
++                  self.event(30.3, "conversation.item.input_audio_transcription.completed", item_id="a", transcript="First.")]
++        rows = trial.realtime_rows(events, [self.chunk, {**self.chunk, "id": "chunk-001"}])
++        self.assertEqual([r["text"] for r in rows], ["First.", "Second."])
++        self.assertEqual(rows[0]["timing"]["first_from_chunk_end_seconds"], -14)
++        self.assertAlmostEqual(rows[1]["timing"]["final_from_chunk_end_seconds"], .2)
++        bad = copy.deepcopy(events)
++        bad[2]["event"]["previous_item_id"] = "wrong"
++        with self.assertRaises(trial.TrialError):
++            trial.realtime_rows(bad, [self.chunk, self.chunk])
++        bad = copy.deepcopy(events)
++        bad[3]["event"]["transcript"] = None
++        with self.assertRaises(trial.TrialError):
++            trial.realtime_rows(bad, [self.chunk, self.chunk])
++
++    def test_timing_separates_chunk_wait_queue_and_service(self):
++        observed = trial.timing(15, 30, 34, 35, 32)
++        self.assertEqual(observed["request_to_first_seconds"], 2)
++        self.assertEqual(observed["first_from_chunk_end_seconds"], 4)
++        self.assertEqual(observed["first_from_chunk_start_seconds"], 19)
++        self.assertEqual(observed["final_from_chunk_end_seconds"], 5)
++
++    def test_realtime_ack_missing_delay_is_reported_not_assumed(self):
++        session = trial.realtime_config()["session"]
++        confirmed = trial.validate_realtime_session(session)
++        self.assertTrue(confirmed["effective_delay_confirmed"])
++        del session["audio"]["input"]["transcription"]["delay"]
++        observed = trial.validate_realtime_session(session)
++        self.assertFalse(observed["effective_delay_confirmed"])
++        self.assertIsNone(observed["echoed_delay"])
++        for value in (None, "high", "medium"):
++            session["audio"]["input"]["transcription"]["delay"] = value
++            with self.assertRaises(trial.TrialError):
++                trial.validate_realtime_session(session)
++
++    def test_realtime_ack_mismatch_still_rejects_and_attempts_stay_budgeted(self):
++        for key, value in (("model", "other"), ("languages", ["ja"])):
++            session = trial.realtime_config()["session"]
++            session["audio"]["input"]["transcription"][key] = value
++            with self.assertRaises(trial.TrialError):
++                trial.validate_realtime_session(session)
++        for key, value in (("format", {"type": "audio/pcm", "rate": 16000}), ("turn_detection", {})):
++            session = trial.realtime_config()["session"]
++            session["audio"]["input"][key] = value
++            with self.assertRaises(trial.TrialError):
++                trial.validate_realtime_session(session)
++        session = trial.realtime_config()["session"]
++        del session["audio"]["input"]["turn_detection"]
++        with self.assertRaises(trial.TrialError):
++            trial.validate_realtime_session(session)
++        first = self.budget.reserve("gpt-live-transcribe", "session", 330)
++        self.budget.settle(first)
++        second = self.budget.reserve("gpt-live-transcribe", "session-attempt-2", 330)
++        self.assertNotEqual(first, second)
++        self.assertEqual(cloud._spent(cloud._load_ledger(), "2030-06-01"), 374_000_000)
++        with self.assertRaises(trial.TrialError):
++            self.budget.reserve("gpt-live-transcribe", "session-attempt-2", 330)
++
++    def test_causal_resampling_has_no_future_samples(self):
++        try:
++            import numpy as np
++            import scipy
++        except ImportError:
++            self.skipTest("CPU resampling dependencies not installed")
++        source = np.zeros(3200, dtype="<i2")
++        future_changed = source.copy()
++        future_changed[1600:] = 30000
++        plain = trial.resample_pcm(source.tobytes())
++        changed = trial.resample_pcm(future_changed.tobytes())
++        self.assertEqual(len(plain), 4800 * 2)
++        self.assertEqual(plain[:2400 * 2], changed[:2400 * 2])
++        self.assertNotEqual(plain, changed)
++
++    def test_key_source_reads_only_requested_file_and_restores_environment(self):
++        env = self.root / "key.env"
++        env.write_text("OPENAI_API_KEY=mock-key-from-file\n")
++        with patch.dict(cloud.os.environ, {"OPENAI_API_KEY": "unrequested-env-key"}):
++            with trial.key_source(env) as key:
++                self.assertEqual(key, "mock-key-from-file")
++            self.assertEqual(cloud.os.environ["OPENAI_API_KEY"], "unrequested-env-key")
++
++
++if __name__ == "__main__":
++    unittest.main()

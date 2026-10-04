@@ -1,0 +1,50 @@
+diff --git a/audio-array/lecture-dashboard/app.js b/audio-array/lecture-dashboard/app.js
+--- a/audio-array/lecture-dashboard/app.js
++++ b/audio-array/lecture-dashboard/app.js
+@@ -792,8 +792,14 @@
+             const actionError = pending.error;
+             const status = state.capture.state;
+             pending = null;
+-            if (action === 'start') message(ACTIVE_CAPTURE.has(status) ? '録音の開始を確認しました。' : (actionError || '開始要求後の状態を取得しました。録音の状態欄を確認してください。'), ACTIVE_CAPTURE.has(status) ? 'good' : 'warning');
+-            else if (!ACTIVE_CAPTURE.has(status)) message('録音の終了を確認しました。残りの認識・分析は続きます。');
++            if (action === 'start') {
++              const receivingAudio = status === 'recording' && capturePresentation(state, connected, now()).tone === 'good';
++              message(receivingAudio ? '音声の受信と録音の開始を確認しました。'
++                : (actionError || (status === 'starting' ? '開始を要求しました。音声の受信と録音の進行は、録音・保存欄で確認してください。'
++                  : '録音の進行を確認できていません。録音・保存欄の状態とエラーを確認してください。')), receivingAudio ? 'good' : 'warning');
++            }
++            else if (status === 'completed') message('録音の終了と保存完了を確認しました。残りの認識・分析は続きます。');
++            else if (!ACTIVE_CAPTURE.has(status)) message(actionError || '録音・保存の正常終了を確認できませんでした。録音・保存欄の状態とエラーを確認してください。', 'warning');
+             else if (status === 'stopping') message('停止を要求しました。保存完了まで状態を確認します。');
+             else message(actionError || '録音はまだ進行中です。停止の完了を確認できていません。', 'warning');
+             renderControls();
+diff --git a/audio-array/tests/test_lecture_ui.js b/audio-array/tests/test_lecture_ui.js
+--- a/audio-array/tests/test_lecture_ui.js
++++ b/audio-array/tests/test_lecture_ui.js
+@@ -489,6 +489,26 @@
+   assert.equal(failure.$('start-button').disabled, false, 'Confirmed idle state permits a deliberate retry');
+   clock = 1030; failure.app.renderStatus(); assert.equal(failure.$('start-button').disabled, true, 'A stale snapshot never permits a new start');
+   assert.equal(failure.$('capture-state').textContent, '不明');
++  clock = 1000;
++  const starting = appFixture(); await starting.app.loadDevices(); await starting.app.poll();
++  starting.post(() => {
++    starting.state(snapshot({capture: {state: 'starting', audio_seconds: 0}}));
++    return response({ok: true});
++  });
++  await starting.app.recordAction('start');
++  assert.doesNotMatch(starting.$('action-message').textContent, /録音の開始を確認/, 'Starting without received audio is not confirmed recording');
++  assert.equal(starting.$('action-message').dataset.tone, 'warning');
++
++  const failedStop = appFixture(); await failedStop.app.loadDevices();
++  failedStop.state(snapshot({capture: {state: 'recording', last_audio_at: clock, audio_seconds: 10}}));
++  await failedStop.app.poll();
++  failedStop.post(() => {
++    failedStop.state(snapshot({capture: {state: 'failed', audio_seconds: 10, error: 'ディスクに保存できませんでした'}}));
++    return response({ok: true});
++  });
++  await failedStop.app.recordAction('stop');
++  assert.equal(failedStop.$('action-message').dataset.tone, 'warning', 'Capture failure after stop must not be a green success');
++  assert.match(failedStop.$('action-message').textContent, /保存.*確認/);
+   for (const fixture of fixtures) fixture.app.dispose();
+   console.log('Lecture UI checks passed (state freshness, reading freeze, source jumps, plain text, action reconciliation).');
+ }

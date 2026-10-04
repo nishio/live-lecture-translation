@@ -2,7 +2,8 @@
 
 This wiki preserves reusable engineering decisions for `live-lecture-translation`. Markdown is the editing authority. Keep source audio, recognized speech, generated lecture content, keys, and machine-specific private data outside the wiki.
 
-- [Engineering decisions](engineering-decisions.md): independent evidence capture, persistent unfinished work, honest timing and quality claims, and their operational consequences.
+- [Engineering decisions](engineering-decisions.md): canonical development ownership, runtime continuity, independent evidence capture, persistent unfinished work, and honest timing and quality claims.
+- [Collected migration follow-ups](migration-follow-ups.md): unapplied source patches, streaming integration lessons, and additional historical measurements.
 - [Architecture](../docs/architecture.md): current components and lifecycle.
 - [Historical experiments](../docs/experiments/README.md): measured values, conditions, estimates, and limits without source content.
 - [Version 0.9 boundary](../docs/release-0.9.md): preserved behavior, known limitations, and development questions.
