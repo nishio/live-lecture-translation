@@ -29,3 +29,11 @@ Extended the existing [field-feedback follow-ups](migration-follow-ups.md#field-
 Added duration/cost tables to both READMEs by extrapolating the already published partial live observation (USD 0.630875 per 30 minutes, or USD 1.26175 per hour). This is a historical illustration with explicit assumptions and exclusions, not a new experiment, current price quote, in-app estimate, or spending guarantee.
 
 Updated topic pages, then the index and this log. Used direct Markdown edits under the repository's explicit Markdown-authority policy; no grasp adoption or database migration was performed. Preserved existing edits. No session artifacts were copied, no runtime or application code was changed, and no capture, inference, or application API request was performed. Additional application API cost was USD 0; development-assistant usage and electricity were not measured. The v0.9.0 baseline tag is unchanged.
+
+## [2026-10-04] file back | Checkout retirement, incomplete processing, and source identity
+
+Compared the current wiki with the later private retirement receipt, stored stage status, and extraction records. Added three missing operational lessons to the existing engineering decisions: an inactive environment can be retired while preserving unsuccessful processing; Git recovery and private runtime-data recovery are separate; and repository HEAD, extracted files, and loaded runtime source need explicit correspondence checks.
+
+Recorded the content-free failure observation without claiming its root cause or a successful long-session run. Updated stale migration wording to reflect the preserved, archived source worktree. The new environment was not set up by that retirement. Aligned AGENTS.md and the operation guide with the distinction between preserving a live session and retiring an inactive, fully preserved checkout. Updated the topic pages, index, then this log.
+
+Existing unrelated edits were retained. Direct Markdown editing follows the repository's explicit authority; no database-backed wiki migration was performed. No private source text, paths, hashes, credentials, manifests, or ledgers were copied into these additions. No application code change, capture, model inference, request retry, or runtime action was performed. Additional application API cost was USD 0; development-assistant usage and electricity were not measured.

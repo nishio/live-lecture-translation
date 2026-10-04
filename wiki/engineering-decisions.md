@@ -6,7 +6,7 @@ This page distills reusable lessons from development. It contains no source spee
 
 The standalone repository owns future Mac lecture application code and reusable engineering knowledge. Device-specific recording, retrieval, multichannel work, and reading/Vision development stay in the originating project. File new lessons into this wiki rather than maintaining parallel copies in the old wiki.
 
-A source repository migration and an operational cutover are separate actions. Existing recording sessions and private evidence stay where they are until saving and remaining processing are confirmed complete. Keep v0.9.0 as the extracted comparison baseline. Preserve additional work as explicit follow-ups without implying that it is already active; see [collected migration follow-ups](migration-follow-ups.md).
+A source repository migration and an operational cutover are separate actions. Do not remove or relocate a live recording session. Once execution has stopped, preserve the private evidence and establish which stages completed, failed, or remain pending before retiring the checkout. A preserved failure need not be relabeled as completion to retire an inactive environment. Keep v0.9.0 as the extracted comparison baseline. Preserve additional work as explicit follow-ups without implying that it is already active; see [collected migration follow-ups](migration-follow-ups.md).
 
 ## Product purpose: understanding with limited attention
 
@@ -53,6 +53,22 @@ A shared daily ledger is authoritative for admission, but its change since start
 API input totals include repeated instructions and context, so they are not the number of unique words spoken. For the recorded provider's usage schema, cache-read and cache-write counts are subsets of total input. Do not add those counts to input again; apply their respective rates to their portions. Keep translation and analysis costs separate: update frequency alone does not identify the more expensive workload. See the [partial live cost observation](../docs/experiments/development-handoff.md#partial-live-cost-observation).
 
 Admission also needs room for the next request's conservative reservation. A request can be blocked while confirmed expense is still below the configured limit. Report that condition separately from uncertain usage or an authorization error, and do not clear reservations to manufacture headroom. Compare a recent-rate projection with an explicitly described planning scenario; a chosen margin is not a statistical upper bound or proof that a session will finish within budget.
+
+## Retire a checkout without erasing unfinished work
+
+Process absence, successful storage, completed recognition, and completed generation are separate facts. In a preserved field run, capture reported input loss after saving about 5 hours 17 minutes; recognition reached the saved audio end, while translation and analysis reported HTTP 429 and 131 eligible source lines remained untranslated. The retirement record establishes these stored states, not a fresh operational observation or an end-to-end success. It does not establish the cause of the missing PCM input or the particular provider-side condition behind HTTP 429.
+
+An inactive checkout can be retired after its files, failure states, pending targets, and cost reservations are verifiably preserved. Confirm absence of the relevant processes and listener as well as consulting saved status; neither alone proves full processing success. Record the unresolved stages and a recovery location before removing the working copy. Archiving does not authorize retrying failed requests or starting the replacement application. A recovery design must reconcile saved target IDs with durable results and request reservations, retain failed attempts, and validate current authorization before any new request.
+
+## Restore application evidence separately from Git history
+
+A Git snapshot or bundle preserves the included source history; it does not establish that ignored recordings, results, caches, or runtime state can be recovered. Inventory tracked, untracked, and ignored files, plus symbolic links and their external targets, before retirement. After stopping writes, preserve private files with a manifest and verify file count, sizes, and per-file hashes. Preserve Git history and uncommitted changes separately. Hash agreement verifies copying, not the semantic correctness or successful completion of a session.
+
+Saving a symbolic link does not save its target. Retain or explicitly account for shared model environments, authorization state, cost ledgers, and inference locks. Use a private old-to-new path map to resolve historical references without rewriting original provenance. A restored Git checkout and a preserved evidence snapshot are not automatically a runnable environment: compare with existing files before copying, verify shared dependencies and time-limited authorization, and inspect pending work before enabling processing. Public documentation contains the method; private manifests, paths, source content, and working configuration remain private.
+
+## Identify the source that produced a result
+
+Repository HEAD, the files selected for extraction, and the source loaded by a running process can differ. Freeze the selected file inventory including dirty and untracked source, record hashes, and compare before and after extraction. Relate it to a session through its saved `source-at-start` files and `runtime-manifest`, where available; do not infer runtime identity from a branch name or current HEAD alone. Keep that private evidence separate from the public file allowlist. Matching hashes establishes source correspondence, not a clean installation, working microphone, correct model output, or successful cloud execution; report those validation layers separately.
 
 ## Open questions
 

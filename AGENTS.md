@@ -4,7 +4,7 @@ Read README.md, docs/architecture.md, and wiki/index.md before changing behavior
 
 This repository is the canonical home for future Mac lecture application code, experiments, field feedback, and reusable implementation knowledge. Keep new development here. Device-specific Android recording, ADB/Wi-Fi retrieval, multichannel processing, and the original reading/Vision project remain in the originating project.
 
-Development migration does not authorize a runtime cutover. Preserve any existing event application until recording and remaining processing are confirmed complete. The v0.9.0 tag remains the baseline; later changes belong to later commits. See wiki/migration-follow-ups.md for collected work that has not been applied.
+Development migration does not authorize a runtime cutover. Preserve a running session. Before retiring a stopped checkout, verify that no capture or processing is active, preserve its private files and shared dependencies, and record completed, failed, and pending stages explicitly. Preserving unfinished work does not mean it succeeded or authorize its replay. The v0.9.0 tag remains the baseline; later changes belong to later commits. See wiki/migration-follow-ups.md for collected work that has not been applied.
 
 - v0.9.0 is the extracted baseline. Record later field feedback separately and implement it in subsequent versions.
 - Keep capture, ASR, translation, and analysis independently observable. A stop request is not proof of completion.

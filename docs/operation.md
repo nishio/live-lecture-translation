@@ -43,6 +43,12 @@ Change code, model configuration, storage roots, or launch configuration between
 
 A saved browser URL can stop authenticating after a restart. Use the current launcher-provided URL. Port-specific cookie names avoid overwriting another local instance's cookie, but cookie delivery itself is not isolated by port.
 
+## Retire or restore a working directory
+
+First confirm that capture and processing are inactive. Preserve ignored session files as well as Git history, verify the private copy against a manifest, and retain shared dependencies referenced by symbolic links. Record the completion, failure, and pending state of each processing stage. A successful backup does not make a failed session successful.
+
+Restoring the Git checkout alone does not restore ignored recordings or results. Verify the private snapshot, path mapping, shared ledger and model dependencies, and current authorization before enabling any processing. Do not overwrite existing evidence or automatically resend pending work. Version 0.9 has no automatic restart recovery. See the [engineering rules](../wiki/engineering-decisions.md#restore-application-evidence-separately-from-git-history).
+
 ## Handle saved files
 
 Session directories can contain audio, recognized speech, translations, analysis, prompts, raw responses, measurements, model metadata, and runtime source records. Treat the whole session as private working data. To share an experiment, create a separate content-free aggregate as described in [data handling](data-handling.md).
