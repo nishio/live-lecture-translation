@@ -1,6 +1,8 @@
 # Historical experiment summaries
 
-The [update-cadence cost comparison](update-cadence-cost.md) reuses saved request usage and durations to estimate 30/60, 20/60 and 15/60-second translation/analysis schedules. It distinguishes confirmed charges from two planning assumptions and makes no new-generation or latency claim.
+The [parallel 15/60-second Audrey replay](parallel-cloud-audrey.md) processed all 59 eligible targets once during 325.567 seconds of real-time input. It produced 23 new API results and reused three cached results, with USD 0.1727353 in confirmed additional cost and USD 0.56391 still reserved after six HTTP 503 failures. Recorded generation intervals overlapped across translation and analysis; exact HTTP overlap and browser-render latency were not measured.
+
+The [update-cadence cost comparison](update-cadence-cost.md) reuses earlier saved request usage and durations to estimate 30/60, 20/60 and 15/60-second translation/analysis schedules. It distinguishes those two planning assumptions from the new parallel replay's measured charges and unresolved reservations.
 
 The new [recognizer-startup trials](asr-startup-readiness.md) separately measured preparation before recording and first-text arrival in 45-second and full 325.567-second real-time replays. Both passed the six-second first-text condition at 4.236/4.206 seconds; preparation took 12.059/8.125 seconds. These were recognition-only runs with USD 0 additional API cost, not new cloud-pipeline validation.
 
