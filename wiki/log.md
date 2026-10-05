@@ -1,5 +1,22 @@
 # Wiki log
 
+## [2026-10-05] file back | Evidence before latency explanations
+
+Distilled the subscription/API conversation into three reusable rules in
+[engineering decisions](engineering-decisions.md#4-recover-and-match-evidence-before-comparing-providers):
+inspect retained per-call artifacts before declaring data unavailable, compare
+matching requests and measurement boundaries, and separate an observed slowdown
+from an unmeasured explanation. Linked the rules from the subscription topic
+and updated the index. The existing canonical experiment document already
+records the timings, matching five-call subset, token increase and limitations;
+no runtime or configuration change follows from this file back.
+
+Used direct Markdown edits because this repository explicitly makes Markdown
+authoritative and is not grasp-write ready. Kept the work in the isolated
+experiment worktree, preserving concurrent development in the main checkout.
+Only reusable findings enter Git; no source/generated content, new capture,
+model inference or API request was involved.
+
 ## [2026-10-05] comparison | Recovered Audrey API call timings
 
 Corrected the earlier incomplete latency answer by inspecting retained per-call

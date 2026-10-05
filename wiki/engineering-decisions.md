@@ -26,6 +26,33 @@ Measure the boundaries that answer the question: chunk completion to recognition
 
 Likewise, keep structural validity, source coverage, semantic fidelity, capture integrity, cost, and duration endurance separate. A result can succeed in one and fail in another. Model agreement is not ground truth; rapid partial text is not proof of a correct final transcript.
 
+## 4. Recover and match evidence before comparing providers
+
+Inspect saved per-call results and publication measurements before declaring
+that historical timing is unavailable. A public summary may contain only
+whole-run duration while private results retain `generation_seconds`. Check
+the timing boundary against the code version that produced the record; a field
+named generation time may include locking, bookkeeping and local persistence.
+Whole-run playback time and per-call processing time answer different questions.
+
+Compare the strongest matching subset first. Check source IDs and hashes,
+target groups, application messages, submitted schemas, requested model and
+reasoning setting, cache hits, and output lengths. State remaining differences
+and sample counts; matching application requests do not guarantee identical
+complete model input or transport settings. In the [Audrey comparison](subscription-provider-experiment.md#recovered-historical-api-call-timings),
+five matching translation requests had API/subscription medians of
+10.150/15.693 seconds (1.55×); analysis windows differed and support only a
+descriptive comparison. Different conditions limit a claim without erasing
+the useful comparison that the saved evidence permits.
+
+Separate the observation from its cause. All five matching subscription calls
+were slower and reported approximately 9,550 additional input tokens, but no
+tool-use loop occurred. Additional instructions, CLI/auth startup and provider
+or network variation are candidate contributors, not measured shares of the
+delay. To attribute latency, instrument those phases separately and use repeated
+comparisons under similar conditions. A runtime described as agentic is not
+evidence that iterative agent behavior caused an observed slowdown.
+
 ## Operational consequences
 
 Changes should be developed in an isolated candidate while a working session continues. Recording and result destinations can be separate, but one shared authorization or budget needs one authoritative ledger and inference lock. A copied checkout must not multiply the allowance.

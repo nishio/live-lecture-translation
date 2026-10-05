@@ -111,3 +111,11 @@ per-call CLI/auth startup are candidate contributors. Timing includes local
 overhead on both paths, not just HTTP; no stage breakdown or contemporaneous
 randomized comparison isolates the cause. Keep causal claims narrower than the
 observed timing comparison. See the [comparison tables](../docs/experiments/audrey-subscription.md#retrospective-comparison-with-the-audrey-api-run).
+
+The reusable [comparison discipline](engineering-decisions.md#4-recover-and-match-evidence-before-comparing-providers)
+is to search retained per-call evidence before claiming it is missing, compare
+the best-matched requests before relying on whole-run totals, and distinguish
+an observed runtime slowdown from an unmeasured causal explanation. Further
+optimization should measure startup/auth, response wait and generation
+separately; it should not assume that removing agentic iteration helps when
+the accepted trials contain no such iteration.
