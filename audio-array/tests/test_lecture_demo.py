@@ -79,6 +79,27 @@ class DemoTests(unittest.TestCase):
             output.writeframes(b'\x00\x00' * int(seconds * rate) * channels)
         return path
 
+    def provisional_fixture(self):
+        events = []
+        for revision, through, published, value in [(1, 3, 1004, 'early temporary words'),
+                                                     (2, 6, 1007, 'corrected temporary words'),
+                                                     (4, 18, 1019, 'later temporary words')]:
+            start = max(0, through - 15)
+            events.append({'revision': revision, 'window_start_seconds': start, 'through_seconds': through,
+                           'ready_at': 1000 + through, 'started_at': 1000 + through + .1,
+                           'published_at': published, 'processing_seconds': .9,
+                           'lines': [{'id': f'p{revision:06d}-l0000', 'text': value, 'language': 'en',
+                                      'start_seconds': start, 'end_seconds': through, 'uncertain': False}]})
+        state = json.loads((self.directory / 'state.json').read_text())
+        state['asr'] = {'state': 'completed', 'through_seconds': 20}
+        state['provisional_asr'] = {**deepcopy(events[-1]), 'enabled': True, 'state': 'completed',
+                                    'refresh_seconds': 3, 'window_seconds': 15, 'error': None, 'lines': []}
+        self.write('state.json', state)
+        self.write_rows('provisional-history.jsonl', events)
+        self.write_rows('provisional-events.jsonl', [{'event': 'failed', 'revision': 3,
+            'window_start_seconds': 0, 'through_seconds': 9, 'at': 1010, 'error': 'synthetic preview failure'}])
+        return events
+
     def fake_http(self, timeline=None, port=9999):
         class FakeServer:
             def __init__(self, address, handler): self.server_port = port; self.handler = handler
@@ -102,6 +123,102 @@ class DemoTests(unittest.TestCase):
         self.assertEqual([line['id'] for line in self.timeline.snapshot(12)['lines']], ['one'])
         self.assertEqual([line['id'] for line in self.timeline.snapshot(21.999)['lines']], ['one'])
         self.assertEqual([line['id'] for line in self.timeline.snapshot(22)['lines']], ['one', 'two'])
+
+    def test_provisional_publications_replace_only_the_temporary_view(self):
+        events = self.provisional_fixture()
+        timeline = DemoTimeline(self.directory)
+        self.assertEqual(timeline.snapshot(3.999)['provisional_asr']['lines'], [])
+        first = timeline.snapshot(4)
+        self.assertEqual(first['lines'], [])
+        self.assertEqual(first['provisional_asr']['lines'], events[0]['lines'])
+        self.assertEqual(timeline.snapshot(6.999)['provisional_asr']['lines'], events[0]['lines'])
+        revised = timeline.snapshot(7)
+        self.assertEqual(revised['provisional_asr']['lines'], events[1]['lines'])
+        self.assertEqual(revised['lines'], [])
+        self.assertEqual(revised['analysis_history'], [])
+        self.assertEqual(timeline.snapshot(19)['provisional_asr']['lines'], events[2]['lines'])
+        self.assertEqual([line['id'] for line in timeline.snapshot(19)['lines']], ['one'])
+        self.assertEqual(timeline.snapshot(22)['provisional_asr']['lines'], [])
+        self.assertEqual(timeline.metadata()['provisional_count'], 3)
+        self.assertEqual(timeline.metadata()['line_count'], 2)
+        # Rewind reconstructs the exact earlier revision, never the final text.
+        revised['provisional_asr']['lines'][0]['text'] = 'tampered'
+        self.assertEqual(timeline.snapshot(7)['provisional_asr']['lines'], events[1]['lines'])
+        self.assertEqual(timeline.snapshot(4)['provisional_asr']['lines'], events[0]['lines'])
+        self.assertEqual(timeline.snapshot(0)['provisional_asr']['lines'], [])
+
+    def test_provisional_failure_preserves_prior_words_until_a_real_success(self):
+        events = self.provisional_fixture()
+        timeline = DemoTimeline(self.directory)
+        self.assertNotEqual(timeline.snapshot(9.999)['provisional_asr']['state'], 'failed')
+        failed = timeline.snapshot(10)['provisional_asr']
+        self.assertEqual(failed['state'], 'failed')
+        self.assertEqual(failed['error'], 'synthetic preview failure')
+        self.assertEqual(failed['lines'], events[1]['lines'])
+        # Canonical recognition catching up removes only the preview text, not its failure.
+        self.assertEqual(timeline.snapshot(12)['provisional_asr']['lines'], [])
+        self.assertEqual(timeline.snapshot(12)['provisional_asr']['state'], 'failed')
+        self.assertIsNone(timeline.snapshot(19)['provisional_asr']['error'])
+        self.assertEqual(timeline.snapshot(7)['provisional_asr']['state'], 'completed')
+
+    def test_provisional_history_is_required_and_validated_without_retiming(self):
+        events = self.provisional_fixture()
+        for mutate in [lambda rows: rows.pop(),
+                       lambda rows: rows[1].update(published_at=1005),
+                       lambda rows: rows[1].update(revision=1),
+                       lambda rows: rows[1]['lines'][0].update(id=rows[0]['lines'][0]['id']),
+                       lambda rows: rows[1]['lines'][0].update(id='one'),
+                       lambda rows: rows[1]['lines'][0].update(end_seconds=99)]:
+            bad = deepcopy(events); mutate(bad)
+            self.write_rows('provisional-history.jsonl', bad)
+            with self.assertRaises(DemoDataError): DemoTimeline(self.directory)
+        (self.directory / 'provisional-history.jsonl').unlink()
+        with self.assertRaises(DemoDataError): DemoTimeline(self.directory)
+
+    def test_old_runs_do_not_gain_provisional_text_and_new_replay_is_read_only(self):
+        self.assertNotIn('provisional_asr', self.timeline.snapshot(12))
+        self.provisional_fixture()
+        before = {path.name: path.read_bytes() for path in self.directory.iterdir()}
+        timeline = DemoTimeline(self.directory)
+        for seconds in [0, 4, 7, 10, 19, 30, 4]: timeline.snapshot(seconds)
+        self.assertEqual(before, {path.name: path.read_bytes() for path in self.directory.iterdir()})
+
+    def test_disabled_provisional_accepts_zero_refresh_without_a_history(self):
+        state = json.loads((self.directory / 'state.json').read_text())
+        state['provisional_asr'] = {'enabled': False, 'state': 'idle', 'refresh_seconds': 0,
+                                    'window_seconds': 15, 'revision': None, 'lines': [], 'published_at': None}
+        self.write('state.json', state)
+        timeline = DemoTimeline(self.directory)
+        self.assertNotIn('provisional_asr', timeline.snapshot(12))
+
+    def test_cancelled_preview_is_paused_at_its_recorded_time_and_keeps_prior_failure(self):
+        self.provisional_fixture()
+        outcomes = [{'event': 'failed', 'revision': 3, 'window_start_seconds': 0,
+                     'through_seconds': 9, 'at': 1010, 'error': 'synthetic preview failure'},
+                    {'event': 'cancelled_before_dispatch', 'revision': 5, 'window_start_seconds': 5,
+                     'through_seconds': 20, 'at': 1032}]
+        self.write_rows('provisional-events.jsonl', outcomes)
+        timeline = DemoTimeline(self.directory)
+        self.assertEqual(timeline.duration, 32)
+        self.assertEqual(timeline.snapshot(31.999)['provisional_asr']['state'], 'completed')
+        self.assertEqual(timeline.snapshot(32)['provisional_asr']['state'], 'paused')
+        self.assertIsNone(timeline.snapshot(32)['provisional_asr']['error'])
+        self.assertEqual(timeline.snapshot(10)['provisional_asr']['state'], 'failed')
+
+    def test_preview_millisecond_rounding_does_not_rewrite_recorded_evidence(self):
+        events = self.provisional_fixture()
+        events[-1]['lines'][0]['start_seconds'] = events[-1]['window_start_seconds'] - .0004
+        events[-1]['lines'][0]['end_seconds'] = events[-1]['through_seconds'] + .0004
+        self.write_rows('provisional-history.jsonl', events)
+        timeline = DemoTimeline(self.directory)
+        self.assertEqual(timeline.snapshot(19)['provisional_asr']['lines'], events[-1]['lines'])
+
+    def test_provisional_ids_cannot_be_borrowed_as_translation_evidence(self):
+        self.provisional_fixture()
+        results = deepcopy(self.results)
+        results[-1]['translations'].append({'source_id': 'p000001-l0000', 'text': 'not canonical evidence'})
+        self.write_rows('analysis-history.jsonl', results)
+        with self.assertRaises(DemoDataError): DemoTimeline(self.directory)
 
     def test_translations_and_history_use_publication_not_cached_generation(self):
         before = self.timeline.snapshot(14.999)

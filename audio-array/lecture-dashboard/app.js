@@ -82,7 +82,7 @@
 
   function contentSignature(state) {
     return JSON.stringify([state?.session?.id, state?.analysis?.generated_at, state?.analysis?.through_seconds, state?.analysis?.result, state?.lines,
-      state?.translation?.enabled, state?.translation?.blocks, state?.analysis_history]);
+      state?.translation?.enabled, state?.translation?.blocks, state?.analysis_history, state?.provisional_asr, state?.asr?.through_seconds]);
   }
 
   function schedulePresentation(schedule, fresh, elapsed = 0, kind = 'analysis') {
@@ -177,6 +177,7 @@
     let renderedSignature = '';
     let lineElements = new Map();
     let renderedTranscriptSignature = '';
+    let renderedProvisionalSignature = '';
     let renderedTranslationSignature = '';
     let translationElements = new Map();
     let translationSession = null;
@@ -617,7 +618,7 @@
           ? (state?.processing_stop_requested !== true ? '停止要求の結果を確認しています。'
             : (view.state === 'busy' ? '新しい処理は始めません。すでに開始した処理の終了時刻は未定です。' : '未処理分を残したまま、新しい処理と再試行を止めています。'))
           : kind === 'asr'
-          ? `円は次の音声区間${number(schedule?.interval_seconds) && schedule.interval_seconds > 0 ? `（${schedule.interval_seconds}秒ごと）` : ''}を受け付けるまでの目安です。受信済みの音声時間をもとに更新し、文字起こしの完了時刻を予測するものではありません。`
+          ? `円は${state?.provisional_asr?.enabled ? '蓄積する原文の' : ''}次の音声区間${number(schedule?.interval_seconds) && schedule.interval_seconds > 0 ? `（${schedule.interval_seconds}秒ごと）` : ''}を受け付けるまでの目安です。受信済みの音声時間をもとに更新し、文字起こしの完了時刻を予測するものではありません。${state?.provisional_asr?.enabled ? `速報は${state.provisional_asr.refresh_seconds}秒ごとの音声で更新を試みます。` : ''}`
           : (view.state === 'waiting' && schedule?.reason === 'continuation'
             ? '文の区切りを待っています。開始時刻は未定です。'
             : '円は次の処理を開始できるまでの目安です。生成完了までの時間ではありません。');
@@ -784,6 +785,36 @@
       renderedTranslationSignature = signature;
       panel.scrollTop = newSession || nearBottom ? panel.scrollHeight : scrollTop;
       if (focused && rows.some(row => row.contains(focused)) && doc.activeElement !== focused) focused.focus({preventScroll: true});
+    }
+
+    function renderProvisional(next) {
+      const preview = next.provisional_asr;
+      // A selected analysis does not carry the temporary recognition view that
+      // existed then. Never borrow a later revision for that historical view.
+      const available = preview?.enabled === true && !historySelection;
+      const caughtUp = number(next.asr?.through_seconds) && number(preview?.through_seconds)
+        && next.asr.through_seconds >= preview.through_seconds;
+      const lines = available && !caughtUp ? array(preview.lines) : [];
+      const error = available ? text(preview.error) || (preview.state === 'failed' ? '速報の更新に失敗しました。' : '') : '';
+      $('provisional-region').hidden = !lines.length && !error;
+      $('provisional-heading').title = preview?.state === 'paused' ? '速報の更新は停止しています。' : '音声が増えると更新します。下の原文と一部重なることがあります。';
+      put('provisional-help', $('provisional-heading').title);
+      showText('provisional-error', error ? `速報の更新に失敗しました。${lines.length ? '最後に届いた速報を残しています。' : ''}` : '');
+      $('provisional-error').title = error;
+      const signature = JSON.stringify([next.session?.id, preview?.revision, lines]);
+      if (signature === renderedProvisionalSignature) return;
+      renderedProvisionalSignature = signature;
+      const panel = $('provisional-lines');
+      const previousTop = panel.scrollTop;
+      const nearBottom = panel.scrollHeight - panel.clientHeight - previousTop < 30;
+      panel.replaceChildren(...lines.map(line => {
+        const row = element('p', 'line-original', text(line.text));
+        row.dataset.provisionalId = text(line.id);
+        row.classList.toggle('uncertain-source', !!line.uncertain);
+        row.title = `${formatTime(line.start_seconds)}–${formatTime(line.end_seconds)}${line.uncertain ? ' · 認識が不確か' : ''}`;
+        return row;
+      }));
+      panel.scrollTop = nearBottom ? panel.scrollHeight : previousTop;
     }
 
     function renderTranscript(next, lines, forceLatest, previousSession) {
@@ -1023,6 +1054,7 @@
       const mode = next.session?.source_kind === 'replay' ? '保存音声の逐次再生' : 'Mac マイク · 1ch';
       put('session-detail', next.session ? `${mode} · ${text(next.session.id)}` : '開始すると、原文と解説がここに届きます。');
       renderTranscript(next, lines, forceLatest, previousSession);
+      renderProvisional(next);
     }
 
     function acceptState(next) {

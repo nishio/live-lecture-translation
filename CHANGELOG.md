@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show provisional recognition from a trailing 15-second audio window with a nominal three-second refresh. Keep revisable previews separate from immutable source lines and translation input, prioritize canonical recognition, preserve stop behavior, and replay previews at their actual recorded publication times.
 - Make the dashboard stop button end capture and new recognition, translation, analysis and retries immediately, retaining saved results and unfinished work. Check stop near model dispatch; already started operations may finish. Natural recorded-file completion still processes its remaining work.
 - Correct release evidence to include the earlier 5-hour-16-minute Mac microphone field run and its capture/cloud failures, alongside the separate accelerated six-hour storage test. Keep current uncertainty handling distinct from historical exclusions.
 - Clarify why microphone preparation needs Swift, the available Ollama translation/analysis path and evaluated `qwen3:4b` quality, and the different meanings of recording stop, shutdown, breaks and starting a new lecture. Identify post-stop connectivity waiting as a release issue, addressed by the immediate-stop change above.

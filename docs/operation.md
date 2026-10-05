@@ -48,7 +48,7 @@ Saved local recognition lets that running session resume translation using text 
 
 After pressing the recording start button, confirm incoming audio, increasing saved duration, and then new source utterances. A request-success notification alone is not evidence of continued capture or completed storage.
 
-The first recognition can take longer while the model initializes. The default 15-second chunk must also finish before its recognition result is available. A quiet input with valid PCM is different from input that has stopped arriving.
+The first recognition can take longer while the model initializes. The 「速報」 area uses the latest available audio, refreshing nominally every three seconds with up to 15 seconds of context. Canonical source recognition still waits for each default 15-second chunk. A quiet input with valid PCM is different from input that has stopped arriving.
 
 Translations are queued on a nominal 60-second schedule and understanding support on a nominal 120-second schedule. One cloud request runs at a time. These intervals are not end-to-end latency promises. Pending translation counts and failure states are more informative than waiting for a particular wall-clock second.
 
@@ -60,7 +60,9 @@ New source text appears above its contextual Japanese translation in the left co
 
 The highlighted line is the latest line visible at the selected point. Gray recognition is uncertain; meaningful content is still sent to translation with its uncertainty reasons. Only narrow filler/duplicate rules exclude uncertain text, preserving an audit record. Pending counts include meaningful uncertain targets. Japanese source lines need no Japanese translation. Old saved sessions without the new policy marker retain their historical exclusions and counts.
 
-Recognition processes a 15-second audio chunk at a time by default, so several source lines can appear together. Repeated adjacent uncertain lines with identical text apart from case and whitespace are shown once. Their original source records remain intact; ordinary source lines and different text are not merged.
+「速報」 is a revisable snapshot of recent speech, displayed above accumulated source lines. Its wording may change and it disappears when canonical recognition catches up. It is not sent directly to translation or analysis. Those stages use immutable source lines from default 15-second chunks, so several source lines can still appear together. Repeated adjacent uncertain lines with identical text apart from case and whitespace are shown once. Their original source records remain intact; ordinary source lines and different text are not merged.
+
+The three-second refresh is a scheduling interval, not a latency guarantee. Canonical recognition has priority over preview work; the newest preview replaces overdue work when inference falls behind. CLI options `--provisional-refresh-seconds` and `--provisional-window-seconds` control preview cadence and context; a refresh of `0` disables it. Saved-result playback uses actual preview publication times, so old sessions without preview history remain unchanged.
 
 ## Finish before closing
 

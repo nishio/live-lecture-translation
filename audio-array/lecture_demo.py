@@ -178,13 +178,16 @@ class DemoTimeline:
         self.asr_events.sort(key=lambda item: item['at'])
         self.analysis_events.sort(key=lambda item: item['at'])
         self.translation_events.sort(key=lambda item: item['at'])
+        self._load_provisional()
         if not self.asr_events:
             raise DemoDataError('再現できる原文記録がありません。')
         self.capture_markers.sort()
         self.capture_end = max(row['chunk']['completed_at'] for row in transcripts)
         last_times = [self.capture_end, *(event['at'] for event in self.asr_events),
                       *(event['at'] for event in self.analysis_events), *(event['at'] for event in self.translation_events),
-                      *(event['at'] for event in self.failures)]
+                      *(event['at'] for event in self.failures),
+                      *(event['published_at'] for event in self.provisional_events),
+                      *(event['at'] for event in self.provisional_failures)]
         if self.audio:
             last_times.append(self.started_at + self.audio_start_seconds + self.audio_seconds)
         self.duration = max(last_times) - self.started_at
@@ -193,6 +196,88 @@ class DemoTimeline:
     def _optional_rows(self, name):
         path = self.directory / name
         return load_rows(path) if path.is_file() else []
+
+    def _load_provisional(self):
+        """Keep rolling previews separate from immutable source/translation evidence."""
+        self.provisional_events = self._optional_rows('provisional-history.jsonl')
+        self.provisional_failures = self._optional_rows('provisional-events.jsonl')
+        final = self.final.get('provisional_asr', {})
+        self.provisional_enabled = final.get('enabled') is True
+        self.provisional_refresh = final.get('refresh_seconds', 3)
+        self.provisional_window = final.get('window_seconds', 15)
+        if not self.provisional_enabled and (self.provisional_events or self.provisional_failures):
+            raise DemoDataError('速報の公開記録と保存状態が一致しません。')
+        if (not numeric(self.provisional_refresh) or self.provisional_refresh < 0
+                or (self.provisional_enabled and self.provisional_refresh == 0)
+                or not numeric(self.provisional_window) or self.provisional_window <= 0):
+            raise DemoDataError('速報の更新間隔・音声窓が不正です。')
+        ids = set(self.all_lines)
+        last_revision, last_through, last_published = 0, 0, self.started_at
+        for event in self.provisional_events:
+            fields = ('window_start_seconds', 'through_seconds', 'ready_at', 'started_at', 'published_at', 'processing_seconds')
+            if (not isinstance(event, dict) or any(not numeric(event.get(key)) for key in fields)
+                    or type(event.get('revision')) is not int or event['revision'] <= last_revision
+                    or not 0 <= event['window_start_seconds'] < event['through_seconds'] <= self.audio_seconds
+                    or event['through_seconds'] <= last_through
+                    or event['through_seconds'] - event['window_start_seconds'] > self.provisional_window + .00001
+                    or not self.started_at <= event['ready_at'] <= event['started_at'] <= event['published_at']
+                    or event['published_at'] < last_published or event['processing_seconds'] < 0
+                    or not isinstance(event.get('lines'), list)):
+                raise DemoDataError('速報の版・音声範囲・実公開時刻が不正です。')
+            for line in event['lines']:
+                if (not isinstance(line, dict) or not isinstance(line.get('id'), str) or not line['id'] or line['id'] in ids
+                        or not isinstance(line.get('text'), str)
+                        or not numeric(line.get('start_seconds')) or not numeric(line.get('end_seconds'))
+                        or not event['window_start_seconds'] - .00051 <= line['start_seconds'] <= line['end_seconds'] <= event['through_seconds'] + .00051):
+                    raise DemoDataError('速報の原文ID・本文・音声範囲が不正です。')
+                ids.add(line['id'])
+            self.capture_markers.append((event['ready_at'], event['through_seconds']))
+            last_revision, last_through, last_published = event['revision'], event['through_seconds'], event['published_at']
+        for event in self.provisional_failures:
+            if (not isinstance(event, dict) or event.get('event') not in {'failed', 'cancelled_before_dispatch'}
+                    or type(event.get('revision')) is not int or event['revision'] <= 0
+                    or not numeric(event.get('at')) or event['at'] < self.started_at
+                    or (event['event'] == 'failed' and not isinstance(event.get('error'), str))
+                    or not numeric(event.get('window_start_seconds')) or not numeric(event.get('through_seconds'))
+                    or not 0 <= event['window_start_seconds'] < event['through_seconds'] <= self.audio_seconds):
+                raise DemoDataError('速報の失敗記録が不正です。')
+        self.provisional_failures.sort(key=lambda event: event['at'])
+        if self.provisional_enabled:
+            if self.provisional_events:
+                last = self.provisional_events[-1]
+                if any(final.get(key) != last[key] for key in ('revision', 'through_seconds', 'published_at')):
+                    raise DemoDataError('速報の最終版と公開記録が一致しません。')
+                cleared = not final.get('lines') and self.final.get('asr', {}).get('through_seconds', 0) >= last['through_seconds']
+                if not cleared and final.get('lines') != last['lines']:
+                    raise DemoDataError('保存された速報の本文と公開記録が一致しません。')
+            elif final.get('lines') or final.get('published_at') is not None:
+                raise DemoDataError('速報の実公開記録がありません。推定で補いません。')
+
+    def _provisional_snapshot(self, at, asr_through):
+        published = [event for event in self.provisional_events if event['published_at'] <= at]
+        latest = published[-1] if published else None
+        result = {'enabled': self.provisional_enabled, 'state': 'waiting',
+                  'refresh_seconds': self.provisional_refresh, 'window_seconds': self.provisional_window,
+                  'revision': None, 'window_start_seconds': 0, 'through_seconds': 0,
+                  'ready_at': None, 'started_at': None, 'published_at': None, 'lines': [], 'error': None}
+        if latest:
+            result.update(deepcopy(latest), state='completed')
+            # No invented word alignment across the independent ASR paths.
+            if asr_through >= latest['through_seconds']:
+                result['lines'] = []
+        outcomes = [event for event in self.provisional_failures if event['at'] <= at
+                    and (latest is None or event['at'] > latest['published_at'])]
+        if outcomes:
+            failed = [event for event in outcomes if event['event'] == 'failed']
+            result.update(state='failed' if outcomes[-1]['event'] == 'failed' else 'paused',
+                          error=failed[-1]['error'] if failed else None)
+        elif any(event['started_at'] <= at < event['published_at'] for event in self.provisional_events):
+            result['state'] = 'running'
+        if at >= self.started_at + self.duration:
+            final = self.final.get('provisional_asr', {})
+            if final.get('state') in {'failed', 'paused'}:
+                result.update(state=final['state'], error=final.get('error'))
+        return result
 
     def _load_translations(self, measurements, line_publications):
         histories = self._optional_rows('translation-history.jsonl')
@@ -292,6 +377,7 @@ class DemoTimeline:
                 'initial_seconds': self.initial_seconds, 'model': self.model, 'configuration': self.configuration,
                 'line_count': len(self.all_lines), 'analysis_count': len(self.analysis_events),
                 'translation_count': len(self.translation_events),
+                'provisional_count': len(self.provisional_events),
                 'cache_hits': sum(bool(event['result'].get('cache_hit')) for event in self.analysis_events),
                 'recorded_api_usd': self.cost.get('confirmed_api_usd'), 'demo_additional_api_usd': 0,
                 'display_simulation': bool(self.simulation), 'preparation_api_usd': self.simulation.get('preparation_api_usd'),
@@ -443,6 +529,7 @@ class DemoTimeline:
                                 'error': translation_error, 'retry_required': False, 'worker_alive': False,
                                 'schedule': self._schedule('translation', self.translation_events, at, translation_state, capture_seconds, translation_diagnostics)},
                 'lines': lines, 'analysis_history': history,
+                **({'provisional_asr': self._provisional_snapshot(at, asr_through)} if self.provisional_enabled else {}),
                 'capabilities': {'cloud_enabled': False, 'continuous_translation': self.continuous, 'analysis_history_paging': False},
                 'message': '', 'demo': {'cursor_seconds': seconds, 'at': at, 'published_lines': len(lines), 'published_analyses': len(analyses),
                                        'published_translations': len(translation_events),

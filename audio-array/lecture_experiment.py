@@ -23,6 +23,7 @@ import time
 import uuid
 
 from lecture_media import inspect_pcm_audio as inspect_audio, prepared_audio, source_identity
+from lecture_provisional import validate_settings as validate_provisional_settings
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -61,12 +62,15 @@ def build_plan(args):
         raise ExperimentError('--authorization, --key-file and --model require --cloud.')
     if args.label and (len(args.label) > 80 or any(ord(char) < 32 for char in args.label)):
         raise ExperimentError('--label must be at most 80 characters without control characters.')
+    validate_provisional_settings(args.provisional_refresh_seconds, args.provisional_window_seconds)
     source, audio, conversion = _planned_audio(args.audio, args.seconds)
     historical = HISTORICAL_USD_PER_HOUR * Decimal(str(audio['selected_seconds'])) / 3600
     return {'schema_version': 1, 'source': source, 'input': audio, 'conversion': conversion, 'label': args.label,
             'configuration': {'provider': 'openai' if args.cloud else 'off',
                 'model': (args.model or 'gpt-6.1-sol') if args.cloud else None,
                 'language': args.language, 'pace': args.pace, 'chunk_seconds': args.chunk_seconds,
+                'provisional_refresh_seconds': args.provisional_refresh_seconds,
+                'provisional_window_seconds': args.provisional_window_seconds,
                 'translation_interval_seconds': args.translation_interval,
                 'analysis_interval_seconds': args.analysis_interval,
                 'model_metadata': str(args.model_metadata.expanduser().resolve())},
@@ -193,6 +197,8 @@ def command_for(plan, data_root, results_root):
         '--replay', plan['input']['path'], '--duration', str(plan['input']['selected_seconds']),
         '--pace', '1' if config['pace'] == 'realtime' else '0', '--provider', config['provider'],
         '--language', config['language'], '--chunk-seconds', str(config['chunk_seconds']),
+        '--provisional-refresh-seconds', str(config['provisional_refresh_seconds']),
+        '--provisional-window-seconds', str(config['provisional_window_seconds']),
         '--model-metadata', config['model_metadata'], '--data-root', str(data_root),
         '--results-root', str(results_root), '--continuous-translation',
         '--translation-interval', str(config['translation_interval_seconds']),
@@ -241,10 +247,51 @@ def _run_child(command, log_path, on_started):
                 signal.signal(sig, handler)
 
 
-def _read_outcome(results_root, cloud, expected_frames):
+def _provisional_outcome(directory, stage):
+    """Summarize saved preview evidence without copying recognized text/errors."""
+    if stage is None:
+        return None
+    if not isinstance(stage, dict):
+        raise ExperimentError('The saved provisional recognition state could not be verified.')
+    if (type(stage.get('enabled')) is not bool or not isinstance(stage.get('state'), str)
+            or not stage['state']):
+        raise ExperimentError('The saved provisional recognition state could not be verified.')
+    summary = {key: stage.get(key) for key in
+               ('enabled', 'state', 'refresh_seconds', 'window_seconds', 'revision', 'through_seconds')}
+    summary.update(error_present=bool(stage.get('error')), successful_snapshots=0,
+                   failed_snapshots=0, cancelled_snapshots=0)
+    for name in ('provisional-history.jsonl', 'provisional-events.jsonl'):
+        path = directory / name
+        if not path.is_file():
+            continue
+        with path.open(encoding='utf-8') as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                    if (not isinstance(row, dict) or type(row.get('revision')) is not int
+                            or row['revision'] < 1):
+                        raise ValueError()
+                    if name == 'provisional-history.jsonl':
+                        published = row.get('published_at')
+                        if (type(published) not in (int, float) or not math.isfinite(published)
+                                or published < 0):
+                            raise ValueError()
+                        summary['successful_snapshots'] += 1
+                    elif row.get('event') == 'failed':
+                        summary['failed_snapshots'] += 1
+                    elif row.get('event') == 'cancelled_before_dispatch':
+                        summary['cancelled_snapshots'] += 1
+                    else:
+                        raise ValueError()
+                except (ValueError, TypeError):
+                    raise ExperimentError('The saved provisional recognition history could not be verified.') from None
+    return summary
+
+
+def _read_outcome(results_root, cloud, expected_frames, expected_provisional=None):
     states = list(results_root.glob('Lecture-*/state.json'))
     if len(states) != 1:
-        return {'completion_confirmed': False, 'stages': {}, 'cost_report': None}
+        return {'completion_confirmed': False, 'stages': {}, 'cost_report': None, 'provisional': None}
     state = json.loads(states[0].read_text())
     if not isinstance(state, dict) or any(not isinstance(state.get(name), dict)
             for name in ('capture', 'asr', 'translation', 'analysis')):
@@ -261,11 +308,23 @@ def _read_outcome(results_root, cloud, expected_frames):
                 and round(audio_seconds * 16000) == expected_frames)
     if cloud:
         complete = complete and stages['translation']['pending_lines'] == 0
+    provisional = _provisional_outcome(states[0].parent, state.get('provisional_asr'))
+    if expected_provisional is not None:
+        refresh, window = expected_provisional
+        # A short or accelerated input can be covered by canonical recognition
+        # before any preview is needed. Do not invent a minimum snapshot count
+        # or require a particular terminal preview label after normal close.
+        matches = (provisional is not None and provisional['enabled'] is bool(refresh)
+                   and provisional['refresh_seconds'] == refresh and provisional['window_seconds'] == window)
+        complete = complete and matches
+        if matches and refresh:
+            complete = (complete and provisional['state'] not in {'failed', 'running'}
+                        and not provisional['error_present'] and not provisional['failed_snapshots'])
     cost_path = states[0].with_name('cost-report.json')
     cost = json.loads(cost_path.read_text()) if cost_path.is_file() else None
     if cost is not None and not isinstance(cost, dict):
         raise ExperimentError('The saved cost report could not be verified.')
-    return {'completion_confirmed': bool(complete), 'stages': stages,
+    return {'completion_confirmed': bool(complete), 'stages': stages, 'provisional': provisional,
             'state_path': str(states[0]), 'cost_report_path': str(cost_path) if cost is not None else None,
             'cost_report': None if cost is None else {key: cost.get(key) for key in
                 ('additional_api_usd', 'confirmed_api_usd', 'retained_reservation_usd', 'codex_usage', 'electricity')}}
@@ -291,7 +350,9 @@ def execute(plan):
     try:
         child = _run_child(command_for(plan, data_root, results_root), results_root / 'process.log', on_started)
         outcome = _read_outcome(results_root, plan['configuration']['provider'] == 'openai',
-                                plan['input']['selected_frames'])
+                                plan['input']['selected_frames'],
+                                (plan['configuration']['provisional_refresh_seconds'],
+                                 plan['configuration']['provisional_window_seconds']))
         try:
             unchanged = inspect_audio(plan['input']['path']) == plan['input']
         except (OSError, ValueError):
@@ -330,6 +391,10 @@ def main(argv=None):
         sub.add_argument('--language', choices=('en', 'ja', 'auto'), default='en')
         sub.add_argument('--pace', choices=('realtime', 'accelerated'), default='realtime')
         sub.add_argument('--chunk-seconds', type=int, choices=range(5, 31), default=15)
+        sub.add_argument('--provisional-refresh-seconds', type=float, default=3,
+                         help='Refresh provisional recognition at this audio interval; 0 disables it')
+        sub.add_argument('--provisional-window-seconds', type=float, default=15,
+                         help='Audio duration used for each revisable provisional snapshot')
         sub.add_argument('--translation-interval', type=_positive_int, default=60)
         sub.add_argument('--analysis-interval', type=_positive_int, default=120)
         sub.add_argument('--model-metadata', type=Path, default=MODEL_METADATA)
@@ -347,6 +412,7 @@ def main(argv=None):
         print(json.dumps({'manifest': str(manifest_path), 'status': result['status'],
                           'completion_confirmed': result['completion_confirmed'],
                           'stages': result.get('stages', {}), 'cost_report': result.get('cost_report'),
+                          'provisional': result.get('provisional'),
                           'error': result.get('error')}, ensure_ascii=False, indent=2))
         return 0 if result['completion_confirmed'] else 2
     except (OSError, ValueError, RuntimeError) as exc:

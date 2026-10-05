@@ -94,6 +94,7 @@ def save_runtime(destination, configuration):
                Path(__file__).with_name('event_insights_cloud.py'),
                Path(__file__).with_name('local_inference.py'),
                Path(__file__).with_name('processing_control.py'),
+               Path(__file__).with_name('lecture_provisional.py'),
                Path(__file__).with_name('catchup_page.py'),
                Path(__file__).with_name('transcribe_local.py'), *ASSETS.glob('*')]
     hashes = {}
@@ -111,6 +112,10 @@ def save_runtime(destination, configuration):
 def blank_state():
     return {'schema_version': 1, 'updated_at': time.time(), 'session': None,
             'processing_stop_requested': False, 'processing_stop_status': None,
+            'provisional_asr': {'enabled': False, 'state': 'idle', 'refresh_seconds': 0,
+                'window_seconds': 15, 'revision': None, 'window_start_seconds': None,
+                'through_seconds': 0, 'ready_at': None, 'started_at': None,
+                'published_at': None, 'lines': [], 'error': None},
             'capture': {'state': 'idle', 'audio_seconds': 0, 'last_audio_at': None,
                         'rms_dbfs': None, 'peak_dbfs': None, 'error': None},
             'asr': {'state': 'idle', 'through_seconds': 0, 'queue_seconds': 0, 'error': None,
@@ -250,9 +255,16 @@ class LectureApp:
                  analysis_interval=None, model_metadata=MODEL_METADATA,
                  transcriber=None, analyzer=None, capture_factory=None, allow_cloud=False, cloud_scope=None,
                  readiness=None, default_model=None, default_language='auto', continuous_translation=False,
-                 translation_interval=60, translator=None):
+                 translation_interval=60, translator=None,
+                 provisional_refresh_seconds=0, provisional_window_seconds=15):
         self.data_root = Path(data_root or REPO / 'data/event-audio/mac-live')
         self.results_root = Path(results_root or REPO / 'results/event-audio/mac-live')
+        from lecture_provisional import validate_settings
+        validate_settings(provisional_refresh_seconds, provisional_window_seconds)
+        self.provisional_refresh_seconds = provisional_refresh_seconds
+        self.provisional_window_seconds = provisional_window_seconds
+        self._provisional_pending = None
+        self._provisional_last_end = self._provisional_revision = 0
         self.chunk_seconds = chunk_seconds
         self.analysis_interval = analysis_interval if analysis_interval is not None else (120 if continuous_translation else 30)
         if type(continuous_translation) is not bool or not math.isfinite(translation_interval) or translation_interval <= 0:
@@ -303,6 +315,7 @@ class LectureApp:
         with self.lock:
             self._refresh_translation_locked()
             self._refresh_stopped_locked()
+            self._refresh_provisional_locked()
             schedules = {kind: self._schedule_locked(kind) for kind in ('analysis', 'translation')}
             result = deepcopy(self.state)
             result['updated_at'] = time.time()
@@ -331,7 +344,9 @@ class LectureApp:
             result['capabilities'].update(continuous_translation=self.continuous_translation,
                 continuous_translation_enabled=self.continuous_translation,
                 translation_interval_seconds=self.translation_interval,
-                analysis_history_paging=True)
+                analysis_history_paging=True,
+                provisional_refresh_seconds=self.provisional_refresh_seconds,
+                provisional_window_seconds=self.provisional_window_seconds)
             from lecture_readiness import AGENDA
             result['capabilities']['agenda'] = deepcopy(AGENDA)
             if self.readiness:
@@ -621,6 +636,7 @@ class LectureApp:
             status = dict(status)
             status['state'] = {'stopped': 'completed', 'error': 'failed'}.get(status.get('state'), status.get('state'))
             self.state['capture'].update(status)
+            self._queue_provisional_locked()
         self.persist()
 
     def _chunk(self, chunk):
@@ -677,6 +693,11 @@ class LectureApp:
             self.abort_processing = threading.Event()
             self.worker_finishing = False
             self.state = blank_state()
+            self._provisional_pending = None
+            self._provisional_last_end = self._provisional_revision = 0
+            self.state['provisional_asr'].update(enabled=bool(self.provisional_refresh_seconds),
+                state='waiting' if self.provisional_refresh_seconds else 'idle',
+                refresh_seconds=self.provisional_refresh_seconds, window_seconds=self.provisional_window_seconds)
             self.state['session'] = {'id': session_id, 'title': '講演中の理解サポート',
                                     'source_kind': 'replay' if replay else 'microphone',
                                     'started_at': time.time(), 'language': language,
@@ -706,6 +727,8 @@ class LectureApp:
             try:
                 save_runtime(self.result_dir, {'language': language, 'provider': provider, 'model': model,
                     'chunk_seconds': self.chunk_seconds, 'analysis_interval': self.analysis_interval,
+                    'provisional_refresh_seconds': self.provisional_refresh_seconds,
+                    'provisional_window_seconds': self.provisional_window_seconds,
                     'continuous_translation': self.continuous_translation,
                     'translation_interval': self.translation_interval,
                     'translation_source_policy_version': SOURCE_POLICY_VERSION,
@@ -1387,6 +1410,105 @@ class LectureApp:
                 self._generation_completed({'kind': kind, 'error': exc})
             return True
 
+    def _queue_provisional_locked(self):
+        if (not self.provisional_refresh_seconds or self.result_dir is None
+                or self.abort_processing.is_set() or self.closing or self.source_done.is_set()):
+            return
+        from lecture_provisional import pending_window
+        window = pending_window(self.state['capture']['audio_seconds'], self._provisional_last_end,
+            self.provisional_refresh_seconds, self.provisional_window_seconds,
+            final=self.state['capture']['state'] in {'completed', 'failed'})
+        if window is None:
+            return
+        self._provisional_revision += 1
+        self._provisional_last_end = window['end_frame']
+        # Replacing this descriptor coalesces stale previews; canonical chunks
+        # remain in their own FIFO and are never removed by preview scheduling.
+        self._provisional_pending = {**window, 'revision': self._provisional_revision,
+            'ready_at': time.time(), 'stop_event': self.abort_processing}
+        stage = self.state['provisional_asr']
+        if stage['state'] in {'idle', 'completed'}:
+            stage['state'] = 'waiting'
+
+    def _refresh_provisional_locked(self):
+        stage = self.state.get('provisional_asr')
+        if not stage or not stage['enabled'] or self.result_dir is None:
+            return
+        if stage['through_seconds'] <= self.state['asr']['through_seconds']:
+            stage['lines'] = []
+        if stage['state'] == 'running':
+            return  # An admitted inference is still owned by the ASR worker.
+        if (self._provisional_pending is not None
+                and self._provisional_pending['through_seconds'] <= self.state['asr']['through_seconds']):
+            self._provisional_pending = None
+        drained = (self.source_done.is_set() and self.audio_queue.empty()
+                   and self._provisional_pending is None
+                   and self.state['asr']['through_seconds'] >= self.state['capture']['audio_seconds'])
+        if self.abort_processing.is_set():
+            if stage['state'] != 'failed':
+                stage['state'] = 'completed' if drained else 'paused'
+        elif self.source_done.is_set() and self.audio_queue.empty() and self._provisional_pending is None:
+            if stage['state'] != 'failed':
+                stage['state'] = 'completed'
+
+    def _process_provisional(self):
+        from catchup_page import build_lines
+        from lecture_provisional import write_window
+        with self.lock:
+            if (self.abort_processing.is_set() or self.closing or self.inference_unconfirmed
+                    or not self.audio_queue.empty() or self._provisional_pending is None):
+                return False
+            job, self._provisional_pending = self._provisional_pending, None
+            if job['through_seconds'] <= self.state['asr']['through_seconds']:
+                self._refresh_provisional_locked()
+                return False
+            session_id = self.state['session']['id']
+            session_dir, result_dir = self.session_dir, self.result_dir
+            language = self.state['session']['language']
+            self.state['provisional_asr']['state'] = 'running'
+        started_at, before = time.time(), time.monotonic()
+        try:
+            with processing_scope(job['stop_event']):
+                check_processing_allowed()
+                self.persist(force=True)
+                check_processing_allowed()
+                chunk = write_window(session_dir / 'audio/raw.pcm',
+                    session_dir / 'provisional' / f"preview-{job['revision']:06d}.wav", job)
+                check_processing_allowed()
+                report = self.transcriber(chunk, result_dir / 'provisional-asr' / f"{job['revision']:06d}.json", language)
+            lines = build_lines({'segments': [{'index': chunk['index'], 'start_seconds': chunk['start_seconds']}]},
+                                {chunk['index']: report})
+            for index, line in enumerate(lines):
+                line['id'] = f"p{job['revision']:06d}-l{index:04d}"
+                line['boundary_context'] = 'revisable rolling recognition; not translation source evidence'
+            event = {key: job[key] for key in ('revision', 'window_start_seconds', 'through_seconds', 'ready_at')}
+            event.update(started_at=started_at, lines=lines)
+            with self.lock:
+                if not self.state['session'] or self.state['session']['id'] != session_id:
+                    return False
+                event.update(published_at=time.time(), processing_seconds=time.monotonic() - before)
+                append_json(result_dir / 'provisional-history.jsonl', event)
+                append_json(result_dir / 'measurements.jsonl', {key: value for key, value in
+                    {**event, 'stage': 'provisional_asr', 'capture_seconds': self.state['capture']['audio_seconds'],
+                     'browser_render_measured': False}.items() if key != 'lines'})
+                self.state['provisional_asr'].update({key: value for key, value in event.items() if key != 'processing_seconds'},
+                                                    state='completed', error=None)
+        except (ProcessingStopped, InferenceCancelled):
+            with self.lock:
+                self.state['provisional_asr']['state'] = 'paused'
+                append_json(result_dir / 'provisional-events.jsonl', {'event': 'cancelled_before_dispatch',
+                    'revision': job['revision'], 'window_start_seconds': job['window_start_seconds'],
+                    'through_seconds': job['through_seconds'], 'at': time.time()})
+        except Exception as exc:
+            with self.lock:
+                self.state['provisional_asr'].update(state='failed', error=str(exc)[:1000])
+                append_json(result_dir / 'provisional-events.jsonl', {'event': 'failed',
+                    'revision': job['revision'], 'window_start_seconds': job['window_start_seconds'],
+                    'through_seconds': job['through_seconds'], 'at': time.time(), 'error': str(exc)[:1000]})
+        finally:
+            self.persist(force=True)
+        return True
+
     def _process(self):
         last_analysis = -math.inf
         last_analyzed_line = None
@@ -1461,8 +1583,16 @@ class LectureApp:
                     finally:
                         self.audio_queue.task_done()
                     self.persist(force=True)
+                else:
+                    self._process_provisional()
                 finished = self.source_done.is_set() and self.audio_queue.empty()
                 with self.lock:
+                    if finished and self._provisional_pending is not None:
+                        if self._provisional_pending['through_seconds'] <= self.state['asr']['through_seconds']:
+                            self._provisional_pending = None
+                        elif not self.abort_processing.is_set():
+                            continue
+                    self._refresh_provisional_locked()
                     eligible = content_lines(self.state['lines'])
                     newest = eligible[-1]['id'] if eligible else None
                     provider = self.state['analysis']['provider']
@@ -1520,7 +1650,10 @@ class LectureApp:
                     self.state['analysis']['state'] = 'idle'
                 failures = (self.state['capture']['state'] == 'failed' or
                             self.state['asr']['state'] == 'failed' or self.state['analysis']['state'] == 'failed'
-                            or self.state['translation']['state'] == 'failed')
+                            or self.state['translation']['state'] == 'failed'
+                            or (self.state['provisional_asr']['enabled']
+                                and (self.state['provisional_asr']['state'] == 'failed'
+                                     or self.state['provisional_asr']['error'])))
                 self.state['message'] = ('追加推論を保留しました。録音と保存状態は別に確認してください。'
                     if self.abort_processing.is_set() or self.state['asr']['state'] == 'paused' else
                     '処理を終了しました。一部に失敗があります。保存された音声と状態を確認してください。'
@@ -1697,6 +1830,9 @@ def main():
     parser.add_argument('--port', type=int, default=8776)
     parser.add_argument('--open', action='store_true')
     parser.add_argument('--chunk-seconds', type=int, choices=range(5, 31), default=15)
+    parser.add_argument('--provisional-refresh-seconds', type=float, default=3,
+                        help='refresh rolling provisional recognition; 0 disables it')
+    parser.add_argument('--provisional-window-seconds', type=float, default=15)
     parser.add_argument('--analysis-interval', type=int)
     parser.add_argument('--continuous-translation', action='store_true')
     parser.add_argument('--translation-interval', type=int, default=60)
@@ -1748,7 +1884,9 @@ def main():
                      model_metadata=args.model_metadata, allow_cloud=args.allow_cloud, cloud_scope=scope,
                      readiness=readiness, default_model=model, default_language=language,
                      data_root=data_root, results_root=results_root,
-                     continuous_translation=args.continuous_translation, translation_interval=args.translation_interval)
+                     continuous_translation=args.continuous_translation, translation_interval=args.translation_interval,
+                     provisional_refresh_seconds=args.provisional_refresh_seconds,
+                     provisional_window_seconds=args.provisional_window_seconds)
     if args.view_session:
         saved = json.loads(args.view_session.read_text())
         if saved.get('schema_version') != 1 or not isinstance(saved.get('lines'), list):
@@ -1763,7 +1901,7 @@ def main():
         app.state['message'] = '保存済みの結果を表示しています。現在の録音ではありません。'
         if app.state['capture']['state'] in ACTIVE:
             app.state['capture'].update(state='failed', error='保存時は録音中でした。現在の状態は未確認です。')
-        for stage in ('asr', 'analysis', 'translation'):
+        for stage in ('asr', 'analysis', 'translation', 'provisional_asr'):
             if app.state.get(stage, {}).get('state') in {'running', 'waiting'}:
                 app.state[stage].update(state='paused', error='保存時の処理です。現在は実行していません。')
     server, url = make_server(app, args.port)

@@ -53,7 +53,8 @@ class ExperimentTest(unittest.TestCase):
         return {key: value for key, value in data.items() if key not in ('check_only', 'runtime_and_authorization_checked')}
 
     def fake_run(self, *, stage='completed', code=0, interrupted=False, write_state=True,
-                 mutate_input=False, audio_seconds=1):
+                 mutate_input=False, audio_seconds=1, provisional_state='completed',
+                 provisional_history=(), provisional_events=(), omit_provisional=False):
         def run(command, log_path, on_started):
             on_started(1234)
             self.assertEqual('0', command[command.index('--port') + 1])
@@ -65,7 +66,18 @@ class ExperimentTest(unittest.TestCase):
                     'completion_confirmed': stage == 'completed', 'pending_lines': 0, 'through_seconds': 1,
                     'audio_seconds': audio_seconds}
                     for name in ('capture', 'asr', 'translation', 'analysis')}}
+                if not omit_provisional:
+                    refresh = float(command[command.index('--provisional-refresh-seconds') + 1])
+                    state['provisional_asr'] = {'enabled': bool(refresh), 'state': provisional_state,
+                        'refresh_seconds': refresh,
+                        'window_seconds': float(command[command.index('--provisional-window-seconds') + 1]),
+                        'revision': 1 if provisional_history else None, 'through_seconds': audio_seconds,
+                        'error': 'synthetic private error' if provisional_state == 'failed' else None,
+                        'lines': [{'text': 'synthetic private recognition'}]}
                 (results / 'state.json').write_text(json.dumps(state))
+                for name, rows in (('provisional-history', provisional_history), ('provisional-events', provisional_events)):
+                    if rows:
+                        (results / (name + '.jsonl')).write_text(''.join(json.dumps(row) + '\n' for row in rows))
                 (results / 'cost-report.json').write_text(json.dumps({'additional_api_usd': 0,
                     'codex_usage': 'not measured', 'electricity': 'not measured'}))
             if mutate_input:
@@ -86,6 +98,8 @@ class ExperimentTest(unittest.TestCase):
         self.assertFalse(Path(result['input']['path']).exists())
         self.assertTrue(result['conversion']['required'])
         self.assertEqual('off', result['configuration']['provider'])
+        self.assertEqual(3, result['configuration']['provisional_refresh_seconds'])
+        self.assertEqual(15, result['configuration']['provisional_window_seconds'])
         self.assertEqual(0, result['cost']['planned_api_usd'])
         self.assertIn('not current pricing', result['cost']['conditions'])
 
@@ -136,7 +150,8 @@ class ExperimentTest(unittest.TestCase):
     def test_command_reuses_existing_replay_with_isolated_port_and_cloud_options(self):
         plan = self.plan('--cloud', '--authorization', str(self.root / 'auth.json'),
                          '--key-file', str(self.root / 'key.env'), '--model', 'gpt-6-luna',
-                         '--pace', 'accelerated', '--chunk-seconds', '5')
+                         '--pace', 'accelerated', '--chunk-seconds', '5',
+                         '--provisional-refresh-seconds', '2.5', '--provisional-window-seconds', '10.5')
         command = experiment.command_for(plan, self.root / 'data-run', self.root / 'result-run')
         self.assertEqual('0', command[command.index('--pace') + 1])
         self.assertEqual('gpt-6-luna', command[command.index('--model') + 1])
@@ -144,6 +159,30 @@ class ExperimentTest(unittest.TestCase):
         self.assertIn('--allow-cloud', command)
         self.assertIn('--exit-after-replay', command)
         self.assertEqual(str(self.audio), command[command.index('--replay') + 1])
+        self.assertEqual('2.5', command[command.index('--provisional-refresh-seconds') + 1])
+        self.assertEqual('10.5', command[command.index('--provisional-window-seconds') + 1])
+        self.assertEqual(2.5, plan['configuration']['provisional_refresh_seconds'])
+        self.assertEqual(10.5, plan['configuration']['provisional_window_seconds'])
+
+    def test_provisional_recognition_can_be_disabled_explicitly(self):
+        plan = self.plan('--provisional-refresh-seconds', '0')
+        command = experiment.command_for(plan, self.root / 'data-run', self.root / 'result-run')
+        self.assertEqual(0, plan['configuration']['provisional_refresh_seconds'])
+        self.assertEqual('0.0', command[command.index('--provisional-refresh-seconds') + 1])
+
+    def test_invalid_provisional_settings_fail_before_audio_or_runtime(self):
+        with patch.object(experiment, '_planned_audio', side_effect=AssertionError('audio read')), \
+                patch.object(experiment, '_run_child', side_effect=AssertionError('child started')):
+            for flags in [('--provisional-refresh-seconds', '-1'),
+                          ('--provisional-refresh-seconds', 'nan'),
+                          ('--provisional-refresh-seconds', '0.01'),
+                          ('--provisional-refresh-seconds', '31'),
+                          ('--provisional-window-seconds', '0'),
+                          ('--provisional-window-seconds', '-1'),
+                          ('--provisional-window-seconds', '31'),
+                          ('--provisional-refresh-seconds', '10', '--provisional-window-seconds', '5')]:
+                with self.subTest(flags=flags):
+                    self.assertEqual(2, self.invoke('run', *flags))
 
     def test_model_preflight_failure_starts_no_process_or_run(self):
         self.metadata.unlink()
@@ -199,6 +238,8 @@ class ExperimentTest(unittest.TestCase):
         self.assertEqual(a['input']['sha256'], b['input']['sha256'])
         self.assertEqual('completed', a['status'])
         self.assertEqual(15, a['configuration']['chunk_seconds'])
+        self.assertEqual(3, a['configuration']['provisional_refresh_seconds'])
+        self.assertEqual(15, a['configuration']['provisional_window_seconds'])
         self.assertEqual(5, b['configuration']['chunk_seconds'])
         self.assertTrue(first.is_relative_to(self.root / 'results/audio-experiments'))
         self.assertEqual(0, a['cost_report']['additional_api_usd'])
@@ -212,6 +253,42 @@ class ExperimentTest(unittest.TestCase):
                 self.assertFalse(output['completion_confirmed'])
                 self.assertEqual('incomplete', output['status'])
                 self.assertTrue(Path(output['manifest']).is_file())
+
+    def test_provisional_metadata_counts_evidence_without_copying_private_content(self):
+        history = ({'revision': 1, 'published_at': 123, 'lines': [{'text': 'synthetic private recognition'}]},)
+        events = ({'revision': 2, 'event': 'cancelled_before_dispatch'},)
+        with patch.object(experiment, '_run_child', side_effect=self.fake_run(
+                provisional_state='paused', provisional_history=history, provisional_events=events)):
+            self.assertEqual(0, self.invoke('run'))
+        result = json.loads(self.stdout.getvalue())
+        self.assertEqual(1, result['provisional']['successful_snapshots'])
+        self.assertEqual(1, result['provisional']['cancelled_snapshots'])
+        self.assertEqual(0, result['provisional']['failed_snapshots'])
+        manifest_text = Path(result['manifest']).read_text()
+        self.assertNotIn('synthetic private', self.stdout.getvalue() + manifest_text)
+
+    def test_provisional_failure_or_missing_requested_stage_is_incomplete(self):
+        for options in ({'provisional_state': 'failed'}, {'omit_provisional': True},
+                        {'provisional_events': ({'revision': 1, 'event': 'failed', 'error': 'synthetic private error'},)}):
+            with self.subTest(options=options), patch.object(experiment, '_run_child', side_effect=self.fake_run(**options)):
+                self.assertEqual(2, self.invoke('run'))
+                result = json.loads(self.stdout.getvalue())
+                self.assertFalse(result['completion_confirmed'])
+                self.assertNotIn('synthetic private', Path(result['manifest']).read_text())
+
+    def test_provisional_can_finish_without_publishing_when_canonical_supersedes_it(self):
+        with patch.object(experiment, '_run_child', side_effect=self.fake_run(provisional_state='waiting')):
+            self.assertEqual(0, self.invoke('run'))
+        self.assertEqual(0, json.loads(self.stdout.getvalue())['provisional']['successful_snapshots'])
+
+    def test_corrupt_provisional_history_is_not_reported_as_success(self):
+        history = ({'revision': 1, 'lines': [{'text': 'synthetic private recognition'}]},)
+        with patch.object(experiment, '_run_child', side_effect=self.fake_run(provisional_history=history)):
+            self.assertEqual(2, self.invoke('run'))
+        result = json.loads(self.stdout.getvalue())
+        self.assertFalse(result['completion_confirmed'])
+        self.assertIn('history could not be verified', result['error'])
+        self.assertNotIn('synthetic private', Path(result['manifest']).read_text())
 
     def test_changed_input_after_processing_is_incomplete(self):
         with patch.object(experiment, '_run_child', side_effect=self.fake_run(mutate_input=True)):
@@ -297,6 +374,8 @@ class ExperimentTest(unittest.TestCase):
             on_started(1234)
             app = live.LectureApp(data_root=Path(command[command.index('--data-root') + 1]),
                 results_root=Path(command[command.index('--results-root') + 1]),
+                provisional_refresh_seconds=float(command[command.index('--provisional-refresh-seconds') + 1]),
+                provisional_window_seconds=float(command[command.index('--provisional-window-seconds') + 1]),
                 transcriber=asr, continuous_translation=True)
             try:
                 replay = Path(command[command.index('--replay') + 1])

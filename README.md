@@ -18,7 +18,7 @@ The aim is to help you follow the lecture with less effort: quickly grasp what i
 
 Transcription data is saved locally. If a coding agent such as Codex can access those files, you can ask questions about the lecture in the agent's chat, such as “Summarize the discussion so far” or “How did the speaker explain this concept?” Specify the transcript file or its saved location when asking.
 
-Results take time to appear because speech recognition, network requests, and generation all add delay. Translation normally runs at roughly 60-second intervals, and key points and concept explanations at 120-second intervals; updates may take longer. See the [operation guide](docs/operation.md) for controls and processing details.
+The 「速報」 area refreshes recognition about every three seconds using up to 15 seconds of recent audio; its wording may change as more speech arrives. Accumulated source lines and translation use separate 15-second recognition chunks. Initialization, recognition and queueing add delay. Translation normally runs at roughly 60-second intervals, and key points and concept explanations at 120-second intervals; updates may take longer. See the [operation guide](docs/operation.md) for controls and processing details.
 
 The dashboard is in Japanese and is designed to support English lecture listening with Japanese text. Automatic language detection and Japanese recognition are also available; Japanese source lines are not translated into Japanese.
 

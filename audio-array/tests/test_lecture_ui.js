@@ -52,6 +52,62 @@ async function run() {
   assert.equal(capturePresentation(snapshot({capture: {state: 'stalled'}}), true, clock).label, '入力途絶・要確認');
   assert.equal(translationMap(snapshot({lines: [{id: 'a', translation_ja: '保存済み'}], analysis: {result: {translations: [{source_id: 'a', text: '旧訳'}, {source_id: 'b', text: '新訳'}]}}})).get('a'), '保存済み');
 
+  const preview = appFixture();
+  const previewLine = (revision, value, uncertain = false) => ({id: `p${revision}-l0`, text: value,
+    start_seconds: 0, end_seconds: 6, language: 'en', uncertain});
+  const previewState = snapshot({session: {id: 'preview', source_kind: 'replay'}, demo: {cursor_seconds: 7},
+    asr: {state: 'waiting', through_seconds: 0, schedule: {state: 'waiting', interval_seconds: 15, remaining_seconds: 8}},
+    provisional_asr: {enabled: true, state: 'completed', refresh_seconds: 3, window_seconds: 15,
+      revision: 2, window_start_seconds: 0, through_seconds: 6, published_at: 997,
+      lines: [previewLine(2, '<script>temporary synthetic words</script>', true)], error: null}});
+  const previewEvidence = JSON.stringify(previewState);
+  preview.app.acceptState(previewState);
+  assert.equal(preview.$('provisional-region').hidden, false);
+  assert.equal(preview.$('provisional-lines').textContent, '<script>temporary synthetic words</script>');
+  assert.equal(preview.$('provisional-lines').children[0].classes.has('uncertain-source'), true);
+  assert.doesNotMatch(preview.$('transcript').textContent, /temporary synthetic/, 'Temporary words never become canonical source rows');
+  assert.match(preview.$('asr-schedule-summary').title, /蓄積する原文/);
+  assert.match(preview.$('asr-schedule-summary').title, /速報は3秒ごと/);
+  assert.equal(JSON.stringify(previewState), previewEvidence, 'Rendering never changes source or preview evidence');
+  preview.app.freeze();
+  const revisedPreview = structuredClone(previewState);
+  revisedPreview.demo.cursor_seconds = 10;
+  revisedPreview.provisional_asr = {...revisedPreview.provisional_asr, revision: 3, through_seconds: 9,
+    published_at: 1000, lines: [previewLine(3, 'corrected synthetic words')]};
+  preview.app.acceptState(revisedPreview);
+  assert.match(preview.$('provisional-lines').textContent, /temporary synthetic/, 'Holding the view also holds the preview revision');
+  preview.app.goLive();
+  assert.equal(preview.$('provisional-lines').children.length, 1);
+  assert.equal(preview.$('provisional-lines').textContent, 'corrected synthetic words', 'A new rolling snapshot replaces rather than appends');
+  const failedPreview = structuredClone(revisedPreview);
+  failedPreview.provisional_asr.state = 'failed'; failedPreview.provisional_asr.error = 'synthetic failure';
+  preview.app.acceptState(failedPreview);
+  assert.equal(preview.$('provisional-lines').textContent, 'corrected synthetic words');
+  assert.match(preview.$('provisional-error').textContent, /最後に届いた速報/);
+  assert.equal(preview.$('provisional-error').title, 'synthetic failure');
+  const caughtUp = structuredClone(failedPreview); caughtUp.asr.through_seconds = 9;
+  caughtUp.lines = [{id: 'canonical', text: 'separate canonical evidence', start_seconds: 0, end_seconds: 9}];
+  preview.app.acceptState(caughtUp);
+  assert.equal(preview.$('provisional-lines').textContent, '');
+  assert.equal(preview.$('provisional-region').hidden, false, 'Canonical progress must not erase a preview failure');
+  assert.equal(preview.$('transcript').textContent, 'separate canonical evidence');
+  const recoveredPreview = structuredClone(caughtUp);
+  recoveredPreview.provisional_asr.state = 'completed'; recoveredPreview.provisional_asr.error = null;
+  preview.app.acceptState(recoveredPreview);
+  assert.equal(preview.$('provisional-region').hidden, true, 'The whole temporary window hides once canonical ASR catches up');
+  preview.app.acceptState(previewState);
+  assert.match(preview.$('provisional-lines').textContent, /temporary synthetic/, 'A backward seek restores the earlier preview');
+  const previewHistory = {...previewState, analysis_history: [{through_seconds: 3, generated_at: 995,
+    headline: {text: 'older interpretation', source_ids: []}}]};
+  preview.app.acceptState(previewHistory);
+  await preview.$('previous-analysis-button').click();
+  assert.equal(preview.$('provisional-region').hidden, true, 'Analysis history cannot borrow a later temporary revision');
+  preview.app.goLive();
+  assert.equal(preview.$('provisional-region').hidden, false);
+  preview.app.acceptState(snapshot({session: {id: 'next-session'}}));
+  assert.equal(preview.$('provisional-region').hidden, true);
+  assert.equal(preview.$('provisional-lines').textContent, '', 'New sessions and old-format state clear prior temporary words');
+
   const splitSettings = new Map([['lecture-idle:v1:local:default', '{"version":1,"language":"ja"}']]);
   const splitStorage = {getItem: key => splitSettings.get(key), setItem: (key, value) => splitSettings.set(key, value)};
   const split = appFixture({storage: splitStorage});
