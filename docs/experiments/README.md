@@ -1,6 +1,6 @@
 # Historical experiment summaries
 
-For a newly executed comparison in this repository, see the [2026-10-05 ASR chunk-duration and provisional-buffer experiment](asr-chunk-duration.md). It contains fresh local recognition measurements and explicitly estimated waiting times. The records below remain historical.
+For newly executed comparisons in this repository, see the [2026-10-05 ASR chunk-duration and provisional-buffer experiment](asr-chunk-duration.md) and [Audrey uncertainty-policy translation comparison](uncertain-translation-audrey.md). The former contains fresh local recognition measurements and explicitly estimated waiting times; the latter sends the same saved ASR through old/new Japanese translation and records meaning-preservation observations and usage-confirmed cost. The records below remain historical.
 
 These records summarize development measurements made before the standalone 0.9 extraction. They contain aggregate numbers and methodology only. Source recordings, recognized speech, translations, API payloads and responses, semantic-review excerpts, screenshots, authenticated URLs, and machine-specific paths are excluded.
 
