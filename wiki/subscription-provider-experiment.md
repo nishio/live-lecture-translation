@@ -74,7 +74,7 @@ All nine calls completed: six translation calls covered 47 eligible rows in
 analyses were saved. Median translation/analysis times were 13.818/36.564 seconds;
 sequential processing took 197.406 seconds for a source recording of 325.567
 seconds. No audio/ASR or wall-clock source replay was performed. Historical API
-analysis windows and prompts differ, so this is not a matched comparison.
+analysis inputs differ, so the complete workload is not a matched comparison.
 
 The main reusable findings are an uncertain-negation boundary that leaves a
 misleading positive-looking target fragment, an analysis headline that drops
@@ -87,3 +87,27 @@ The nine calls reported 106,654 input and 5,263 output tokens. No application
 API-key calls were made; subscription allowance percentage and currency
 allocation were not measured. CPU regression validation passed 358 tests,
 with two optional native tests skipped, and both Node UI checks passed.
+
+## Recovered historical API call timings
+
+Read the private per-call results before concluding that only whole-run timing
+exists. The successful Audrey API run retained six translation generation times
+(median 9.019 seconds) and four analysis times (median 17.435 seconds). Compared
+with subscription medians of 13.818/36.564 seconds, these are ratios of 1.53/2.10.
+All ten API results match saved publication measurements and have no application
+cache hits. No new inference was performed to recover this evidence.
+
+Five of the six translation application messages and output schemas match
+exactly, with the same requested model and low reasoning setting. These five
+API/subscription pairs have medians 10.150/15.693 seconds (1.55×), and every
+subscription call took 3.693–5.984 seconds longer. The first translation uses
+different context but the same targets. Analysis windows differ, including one
+tiny startup API request, so analysis is a reference comparison only.
+
+This establishes an observed slowdown for this implementation and these runs.
+It does not attribute it to agentic iteration: accepted calls had no tool loop.
+The extra roughly 9,600 reported input tokens per matching translation and
+per-call CLI/auth startup are candidate contributors. Timing includes local
+overhead on both paths, not just HTTP; no stage breakdown or contemporaneous
+randomized comparison isolates the cause. Keep causal claims narrower than the
+observed timing comparison. See the [comparison tables](../docs/experiments/audrey-subscription.md#retrospective-comparison-with-the-audrey-api-run).

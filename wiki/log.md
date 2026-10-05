@@ -1,5 +1,20 @@
 # Wiki log
 
+## [2026-10-05] comparison | Recovered Audrey API call timings
+
+Corrected the earlier incomplete latency answer by inspecting retained per-call
+API results, their publication measurements and source metadata. Recovered
+translation/analysis medians of 9.019/17.435 seconds, versus subscription
+13.818/36.564 seconds. Five translation application messages and schemas match
+exactly; every one was slower through subscription, with paired differences
+3.693–5.984 seconds. The first translation context and analysis windows differ.
+Recorded raw numerical timings and comparison limits in the content-free
+experiment aggregate, then updated the topic, index and log. No inference,
+capture, runtime change or application code change was performed. Retained
+source and generated text stay private. No timing breakdown establishes whether
+CLI startup, extra instructions, provider/network variation or another factor
+caused the observed slowdown.
+
 ## [2026-10-05] experiment | Audrey saved ASR through the subscription path
 
 At the user's request, ran the existing reviewed Audrey lecture transcript

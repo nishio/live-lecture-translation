@@ -122,6 +122,70 @@ the output count. These describe nine subscription invocations, not an API cost
 estimate. No application API-key calls were made. API charge reconciliation,
 subscription allowance percentage and currency allocation remain unmeasured.
 
+## Retrospective comparison with the Audrey API run
+
+The historical successful Audrey run retained per-call `generation_seconds`
+in its private result files. These were recovered on 2026-10-05; the earlier
+answer that had only checked the public run aggregate missed this evidence.
+No new API or subscription request was needed. All ten API results were real
+generations, with no application response-cache hits, and matched their saved
+publication-measurement entries. The original 62 source rows match the frozen
+sample on IDs, text, times and uncertainty.
+
+| Workload | Historical API calls | API median (min–max) | Subscription calls | Subscription median (min–max) | Ratio of medians |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Translation | 6 | 9.019 s (5.134–14.341) | 6 | 13.818 s (9.758–20.150) | 1.53× |
+| Analysis | 4 | 17.435 s (6.989–24.737) | 3 | 36.564 s (34.221–37.689) | 2.10× |
+
+Translation provides the stronger comparison: all six ordered target-ID lists
+and group boundaries match. The last five application message lists and output
+schemas are exactly equal. Only the first call has different source context
+(seven API rows versus 17 subscription rows). Both paths requested
+`gpt-6.1-sol` with low reasoning effort. Codex still adds its own base instructions
+and wrapper, so equality of application requests is not equality of complete
+model input or every transport parameter.
+
+| Translation call | API seconds | Subscription seconds | Additional seconds |
+| --- | ---: | ---: | ---: |
+| 1 (different context) | 5.919 | 11.943 | 6.024 |
+| 2 | 13.798 | 19.782 | 5.984 |
+| 3 | 7.887 | 11.580 | 3.693 |
+| 4 | 14.341 | 20.150 | 5.809 |
+| 5 | 10.150 | 15.693 | 5.542 |
+| 6 | 5.134 | 9.758 | 4.624 |
+
+Every subscription translation took longer. For the five matching application
+requests, the added time was 3.693–5.984 seconds, with a median paired difference
+of 5.542 seconds. Output lengths were also close: 2,090 API versus 2,091
+subscription output tokens across all six translations. This is evidence that
+this subscription implementation was slower in these runs, not an isolated
+measurement of the cause or a general provider ranking.
+
+Restricting the calculation to those five matching application requests gives
+medians of 10.150 seconds for API and 15.693 seconds for subscription (1.55×).
+Their reported input-token counts increase by 9,547–9,566 per request through
+Codex. Additional runtime instructions/context are a plausible contributor,
+but token totals do not measure their share of elapsed time.
+
+Analysis is a descriptive comparison only: its source windows and row counts
+differ, and the API run includes a tiny one-row startup analysis. Excluding that
+startup gives an API median of 17.591 seconds and a subscription/API ratio of
+2.08×, but does not make the remaining inputs identical.
+
+Both timing metrics measure application generation work rather than only the
+HTTP exchange. They include provider processing and local overhead; they
+exclude the scheduling interval, recognition and browser rendering. The
+subscription metric additionally includes CLI startup and authentication checks.
+The historical timing code was checked against saved runtime source hashes.
+API timing includes ledger/lock work and intermediate artifact persistence but
+ends before saving the final result file; subscription timing includes saving
+the validated result. Neither path separately records HTTP-only duration.
+These runs were not contemporaneous randomized trials, and startup, queueing,
+generation and storage were not separately timed. No tool-use loop occurred
+in the nine accepted subscription turns. The result supports an observed
+slowdown, but cannot assign it specifically to agentic iteration or isolate
+how much is CLI/base-instruction overhead versus provider/network variation.
+
 ## Source/output review
 
 The review compared all 12 translation blocks and three analyses with their

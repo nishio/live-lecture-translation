@@ -270,5 +270,169 @@
     "historical API source windows and prompt/runtime differ",
     "no direct quota percentage or currency measurement",
     "CPU regression tests ran concurrently during early generation calls"
-  ]
+  ],
+  "historical_api_timing_comparison": {
+    "kind": "retrospective_saved_call_timings",
+    "extraction_date": "2026-10-05",
+    "new_inference_calls": 0,
+    "same_saved_transcript_rows": 62,
+    "requested_model_both": "gpt-6.1-sol",
+    "reasoning_effort_both": "low",
+    "api_application_cache_hits": 0,
+    "api_metric": "result.generation_seconds",
+    "subscription_metric": "report.results.elapsed_seconds",
+    "metric_scope": "application generation duration, not HTTP-only latency; includes provider processing and local overhead; excludes schedule/ASR/browser waits",
+    "api_calls": {
+      "translation": [
+        {
+          "ordinal": 1,
+          "through_seconds": 44.74,
+          "source_count": 7,
+          "target_count": 6,
+          "generation_seconds": 5.919465916987974,
+          "output_tokens": 246
+        },
+        {
+          "ordinal": 2,
+          "through_seconds": 120.0,
+          "source_count": 24,
+          "target_count": 9,
+          "generation_seconds": 13.797765750001417,
+          "output_tokens": 527
+        },
+        {
+          "ordinal": 3,
+          "through_seconds": 180.0,
+          "source_count": 14,
+          "target_count": 6,
+          "generation_seconds": 7.887234291993082,
+          "output_tokens": 244
+        },
+        {
+          "ordinal": 4,
+          "through_seconds": 240.0,
+          "source_count": 17,
+          "target_count": 9,
+          "generation_seconds": 14.340781499980949,
+          "output_tokens": 536
+        },
+        {
+          "ordinal": 5,
+          "through_seconds": 299.26,
+          "source_count": 21,
+          "target_count": 13,
+          "generation_seconds": 10.150364083005115,
+          "output_tokens": 370
+        },
+        {
+          "ordinal": 6,
+          "through_seconds": 324.54,
+          "source_count": 15,
+          "target_count": 4,
+          "generation_seconds": 5.134377416019561,
+          "output_tokens": 167
+        }
+      ],
+      "analysis": [
+        {
+          "ordinal": 1,
+          "through_seconds": 7.16,
+          "source_count": 1,
+          "target_count": 0,
+          "generation_seconds": 6.988721292000264,
+          "output_tokens": 137
+        },
+        {
+          "ordinal": 2,
+          "through_seconds": 135.0,
+          "source_count": 17,
+          "target_count": 0,
+          "generation_seconds": 17.279244167002616,
+          "output_tokens": 1049
+        },
+        {
+          "ordinal": 3,
+          "through_seconds": 252.64,
+          "source_count": 26,
+          "target_count": 0,
+          "generation_seconds": 24.736771333991783,
+          "output_tokens": 1052
+        },
+        {
+          "ordinal": 4,
+          "through_seconds": 324.54,
+          "source_count": 33,
+          "target_count": 0,
+          "generation_seconds": 17.59130975001608,
+          "output_tokens": 1121
+        }
+      ]
+    },
+    "comparison": {
+      "translation": {
+        "api_count": 6,
+        "subscription_count": 6,
+        "api_min_seconds": 5.134377416019561,
+        "api_median_seconds": 9.018799187499098,
+        "api_max_seconds": 14.340781499980949,
+        "subscription_median_seconds": 13.817966666494613,
+        "difference_of_medians_seconds": 4.799167478995514,
+        "ratio_of_medians": 1.5321293200149761,
+        "target_ids_and_groups_match_all_calls": true,
+        "application_messages_and_schema_match_ordinals": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "first_call_api_context_rows": 7,
+        "first_call_subscription_context_rows": 17,
+        "paired_delta_seconds": [
+          6.023846833006246,
+          5.983860000007553,
+          3.6931404579954688,
+          5.808780625025975,
+          5.54225649998989,
+          4.623638875986217
+        ],
+        "paired_delta_median_seconds": 5.675518562507932,
+        "matched_five_paired_delta_median_seconds": 5.54225649998989,
+        "matched_five_api_median_seconds": 10.150364083005115,
+        "matched_five_subscription_median_seconds": 15.692620582995005,
+        "matched_five_reported_input_token_increases": [
+          9566,
+          9547,
+          9550,
+          9556,
+          9547
+        ],
+        "api_output_tokens": 2090,
+        "subscription_output_tokens": 2091,
+        "matched_five_ratio_of_medians": 1.5460155374396236
+      },
+      "analysis": {
+        "api_count": 4,
+        "subscription_count": 3,
+        "api_min_seconds": 6.988721292000264,
+        "api_median_seconds": 17.43527695850935,
+        "api_max_seconds": 24.736771333991783,
+        "subscription_median_seconds": 36.56422112500877,
+        "difference_of_medians_seconds": 19.128944166499423,
+        "ratio_of_medians": 2.097140252605134,
+        "api_median_excluding_one_line_startup_seconds": 17.59130975001608,
+        "ratio_excluding_one_line_startup": 2.0785388720118094,
+        "source_windows_match": false
+      }
+    },
+    "limits": [
+      "Not a randomized contemporaneous benchmark; each dataset contains one run.",
+      "Five translation application requests match, but Codex adds its own instructions and transport settings.",
+      "Translation first-call context differs; all six target lists and groups match.",
+      "Analysis source windows and source counts differ; first API analysis contains one source row.",
+      "CLI startup/auth, provider queue, generation and local overhead were not timed separately.",
+      "Subscription served model identity not independently attested.",
+      "Early subscription calls overlapped CPU regression tests."
+    ]
+  }
 }
