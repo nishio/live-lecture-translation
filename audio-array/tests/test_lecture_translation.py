@@ -173,6 +173,194 @@ class PlannerTests(unittest.TestCase):
             cloud.build_payload(request["messages"], request["schema"], "gpt-6-luna")
 
 
+class SentencePlannerTests(unittest.TestCase):
+    def plan(self, rows, covered=(), **options):
+        return translation.plan_sentence_translation(rows, covered, **{
+            "through_seconds": max((row["end_seconds"] for row in rows), default=0), **options})
+
+    def reasons(self, result):
+        return [item["reason"] for item in result["plan"]["selection"]["group_boundaries"]]
+
+    def test_continuation_is_held_then_selected_with_its_whole_source(self):
+        initial = [line(0, "We can solve this."), line(1, "But only if")]
+        first = self.plan(initial)
+        self.assertEqual(first["ready_source_ids"], ["s0"])
+        self.assertEqual(first["waiting_source_ids"], ["s1"])
+        self.assertEqual(first["next_through_seconds"], 35.5)
+        self.assertEqual(self.reasons(first), ["sentence"])
+        rows = initial + [line(2, "we work together.")]
+        edge = self.plan(rows, {"s0"})
+        self.assertIsNone(edge["plan"])
+        self.assertEqual(edge["waiting_source_ids"], ["s1", "s2"])
+        self.assertEqual(edge["next_through_seconds"], 10.5)
+        ready = self.plan(rows, {"s0"}, through_seconds=10.5)
+        self.assertEqual(ready["plan"]["groups"], [["s1", "s2"]])
+        self.assertEqual(ready["waiting_source_ids"], [])
+
+    def test_whole_mixed_row_waits_even_if_it_contains_a_complete_sentence(self):
+        rows = [line(0, "We can solve this. But only if")]
+        result = self.plan(rows, through_seconds=10)
+        self.assertIsNone(result["plan"])
+        self.assertEqual(result["waiting_source_ids"], ["s0"])
+        self.assertEqual(result["next_through_seconds"], 32.5)
+
+    def test_lookahead_and_timeout_use_only_processed_audio(self):
+        rows = [line(0)]
+        with mock.patch.object(translation.time, "time", return_value=10**12), \
+                mock.patch.object(translation.time, "monotonic", return_value=10**12):
+            waiting = self.plan(rows)
+            self.assertIsNone(waiting["plan"])
+            self.assertEqual(waiting["next_through_seconds"], 4.5)
+            ready = self.plan(rows, through_seconds=4.5)
+            self.assertEqual(self.reasons(ready), ["sentence"])
+            incomplete = [line(0, "We can only")]
+            self.assertIsNone(self.plan(incomplete, through_seconds=32.49)["plan"])
+            forced = self.plan(incomplete, through_seconds=32.5)
+            self.assertEqual(self.reasons(forced), ["timeout"])
+            self.assertEqual(forced["plan"]["through_seconds"], 32.5)
+
+    def test_abbreviations_initials_ellipses_and_dangling_words_wait(self):
+        for text in ["Please ask Dr.", "The initials are A.", "In the U.S.",
+                     "For example e.g.", "A Ph.D.", "On Dec.", "Smith et al.", "The label is (A.)",
+                     "The amount is 3.14", "We should...", "We should…",
+                     "We should…!", "But only if.", "This is because.", "Such as."]:
+            with self.subTest(text=text):
+                self.assertIsNone(self.plan([line(0, text)], through_seconds=10)["plan"])
+        for text in ["We can solve this.", "Can we solve this?", "We did it!", 'She said, "Yes."']:
+            with self.subTest(text=text):
+                self.assertEqual(self.reasons(self.plan([line(0, text)], through_seconds=10)), ["sentence"])
+
+    def test_each_capped_group_returns_to_its_last_sentence_boundary(self):
+        rows = [line(i, "continuing the thought") for i in range(18)]
+        rows[3]["text"] = "the first sentence ends here."
+        rows[10]["text"] = "the second sentence ends here."
+        rows[16]["text"] = "the third sentence ends here."
+        result = self.plan(rows, through_seconds=60)
+        self.assertEqual(result["plan"]["groups"],
+                         [[f"s{i}" for i in range(4)], [f"s{i}" for i in range(4, 11)],
+                          [f"s{i}" for i in range(11, 17)]])
+        self.assertEqual(self.reasons(result), ["sentence"] * 3)
+        self.assertEqual(result["waiting_source_ids"], ["s17"])
+
+    def test_capacity_forces_fragment_but_retains_the_next_tail(self):
+        rows = [line(i, "continuing") for i in range(9)]
+        result = self.plan(rows)
+        self.assertEqual(result["plan"]["groups"], [[f"s{i}" for i in range(8)]])
+        self.assertEqual(self.reasons(result), ["limit"])
+        self.assertEqual(result["waiting_source_ids"], ["s8"])
+        self.assertEqual(result["next_through_seconds"], 56.5)
+        for limit_rows in [
+                [line(0, "é" * 500), line(1, "é" * 501)],
+                [line(0, "continuing", end_seconds=30), line(1, "continuing", start_seconds=30, end_seconds=50)]]:
+            with self.subTest(rows=limit_rows):
+                capped = self.plan(limit_rows)
+                self.assertEqual(capped["ready_source_ids"], ["s0"])
+                self.assertEqual(self.reasons(capped), ["limit"])
+                self.assertEqual(capped["waiting_source_ids"], ["s1"])
+
+    def test_final_drain_bypasses_lookahead_but_labels_unfinished_tail(self):
+        result = self.plan([line(0), line(1, "But only if")], end_of_input=True)
+        self.assertEqual(result["plan"]["groups"], [["s0"], ["s1"]])
+        self.assertEqual(self.reasons(result), ["sentence", "end_of_input"])
+        self.assertEqual(result["waiting_source_ids"], [])
+        self.assertIsNone(result["next_through_seconds"])
+
+    def test_excluded_covered_and_overlapping_rows_are_source_barriers(self):
+        for change, covered in [({"uncertain": True}, set()), ({"language": "ja"}, set()),
+                                ({"text": ""}, set()), ({}, {"s1"})]:
+            with self.subTest(change=change, covered=covered):
+                rows = [line(0, "An unfinished clause", end_seconds=4),
+                        line(1, start_seconds=2, end_seconds=3, **change),
+                        line(2, "Another unfinished clause", start_seconds=3, end_seconds=5)]
+                result = self.plan(rows, covered)
+                self.assertEqual(result["plan"]["groups"], [["s0"]])
+                self.assertEqual(self.reasons(result), ["source_gap"])
+                self.assertEqual(result["waiting_source_ids"], ["s2"])
+
+    def test_known_failed_audio_interval_splits_even_a_short_gap(self):
+        rows = [line(0, "Before a missing interval"), line(1, "After that interval")]
+        self.assertIsNone(self.plan(rows)["plan"])
+        failed = [{"start_seconds": 2.5, "end_seconds": 3.0}]
+        result = self.plan(rows, source_breaks=failed)
+        self.assertEqual(result["plan"]["groups"], [["s0"]])
+        self.assertEqual(self.reasons(result), ["source_gap"])
+        self.assertEqual(result["waiting_source_ids"], ["s1"])
+        self.assertEqual(result["plan"]["selection"]["source_breaks"], failed)
+        long_gap = [rows[0], line(1, "After a long gap", start_seconds=8, end_seconds=10)]
+        self.assertEqual(self.reasons(self.plan(long_gap)), ["source_gap"])
+
+    def test_failed_final_interval_closes_tail_without_inventing_completion(self):
+        rows = [line(0, "But only if")]
+        failed = [{"start_seconds": 2.5, "end_seconds": 3.0}]
+        for end_of_input in [False, True]:
+            with self.subTest(end_of_input=end_of_input):
+                result = self.plan(rows, source_breaks=failed, end_of_input=end_of_input)
+                self.assertEqual(result["ready_source_ids"], ["s0"])
+                self.assertEqual(self.reasons(result), ["source_gap"])
+                self.assertEqual(result["plan"]["selection"]["source_breaks"], failed)
+                self.assertIsNone(result["next_through_seconds"])
+
+    def test_oversized_source_blocks_fifo_instead_of_disappearing(self):
+        rows = [line(0, "complete."), line(1, "x" * 2001), line(2)]
+        first = self.plan(rows, through_seconds=12)
+        self.assertEqual(first["ready_source_ids"], ["s0"])
+        self.assertEqual(first["waiting_source_ids"], ["s1", "s2"])
+        self.assertEqual(first["plan"]["selection"]["blocked_next_source_id"], "s1")
+        with self.assertRaises(translation.OversizedSourceError):
+            self.plan(rows, {"s0"}, through_seconds=12)
+        with self.assertRaises(translation.OversizedSourceError):
+            self.plan([line(0, end_seconds=45.01)])
+
+    def test_successive_plans_conserve_all_eligible_ids_and_strict_order(self):
+        rows = [line(i, "a complete sentence." if i % 5 == 4 else "a continuing phrase") for i in range(103)]
+        rows[20]["uncertain"] = True
+        rows[40]["language"] = "ja"
+        rows[60]["text"] = ""
+        expected = [row["id"] for row in rows if translation._eligible(row)]
+        covered, actual = set(), []
+        while len(covered) < len(expected):
+            result = self.plan(rows, covered, end_of_input=True)
+            self.assertIsNotNone(result["plan"])
+            self.assertEqual(result["ready_source_ids"], expected[len(actual):len(actual) + len(result["ready_source_ids"])])
+            self.assertEqual(result["ready_source_ids"] + result["waiting_source_ids"], expected[len(actual):])
+            request = translation.build_translation_request(result["plan"])
+            self.assertEqual(request["target_source_ids"], result["ready_source_ids"])
+            actual.extend(result["ready_source_ids"])
+            covered.update(result["ready_source_ids"])
+        self.assertEqual(actual, expected)
+        finished = self.plan(rows, covered, end_of_input=True)
+        self.assertEqual(finished, {"plan": None, "ready_source_ids": [], "waiting_source_ids": [],
+                                    "next_through_seconds": None})
+
+    def test_group_reason_is_frozen_with_plan_and_saved_with_result(self):
+        result = self.plan([line(0, "But only if")], end_of_input=True)
+        plan = result["plan"]
+        altered = copy.deepcopy(plan)
+        altered["selection"]["group_boundaries"][0]["reason"] = "sentence"
+        with self.assertRaises(translation.TranslationInputError):
+            translation.build_translation_request(altered)
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(translation, "PRIVATE_ROOTS", (Path(directory),)), \
+                mock.patch.object(cloud, "generate", return_value={"result": response(plan)}):
+            generated = translation.translate_batch(plan, provider="openai", model="gpt-6-luna", out_dir=directory)
+            saved = json.loads((Path(generated["artifact_dir"]) / "result.json").read_text())
+            self.assertEqual(saved["selection"]["group_boundaries"],
+                             [{"source_ids": ["s0"], "reason": "end_of_input"}])
+
+    def test_invalid_frontier_timing_and_breaks_fail_without_inference(self):
+        for options in [{"through_seconds": 2}, {"through_seconds": float("nan")},
+                        {"through_seconds": True}, {"max_wait_seconds": -1},
+                        {"lookahead_seconds": True}, {"end_of_input": 1},
+                        {"source_breaks": "bad"}, {"source_breaks": [{}]},
+                        {"source_breaks": [{"start_seconds": 4, "end_seconds": 3}]}]:
+            with self.subTest(options=options), self.assertRaises(translation.TranslationInputError):
+                self.plan([line(0)], **options)
+        with mock.patch.object(cloud, "generate", side_effect=AssertionError("inference")), \
+                mock.patch.object(cloud, "_atomic_json", side_effect=AssertionError("write")):
+            result = self.plan([line(0)], through_seconds=5)
+            translation.build_translation_request(result["plan"])
+
+
 class ResponseTests(unittest.TestCase):
     def setUp(self):
         self.plan = translation.plan_translation([line(0), line(1), line(2, uncertain=True), line(3)], set(), flush=True)

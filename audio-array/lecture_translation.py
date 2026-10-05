@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import copy
+import re
 from pathlib import Path
 import time
 import uuid
@@ -216,11 +217,16 @@ def plan_translation(lines, covered_source_ids, *, flush=False):
             groups.append(current)
     if not groups:
         return None
+    return _assemble_plan(clean, pending, groups, through=max(row["end_seconds"] for row in clean),
+                          flush=flush, blocked=blocked)
+
+
+def _assemble_plan(clean, pending, groups, *, through, flush, blocked, selection_extra=None):
+    """Freeze selected whole rows with the shared bounded context and validation."""
     targets = [row for group in groups for row in group]
     target_ids = [row["id"] for row in targets]
     target_set = set(target_ids)
     group_ids = [[row["id"] for row in group] for group in groups]
-    through = max(row["end_seconds"] for row in clean)
     windows = [(group[0]["start_seconds"] - CONTEXT_SECONDS,
                 max(row["end_seconds"] for row in group) + CONTEXT_SECONDS) for group in groups]
     candidates = [row for row in clean if row["id"] not in target_set and row["text"]
@@ -254,6 +260,8 @@ def plan_translation(lines, covered_source_ids, *, flush=False):
                  "context_omitted_source_ids": [row["id"] for row in candidates if row["id"] not in selected_ids],
                  "blocked_next_source_id": blocked, "complete_pending_coverage": len(targets) == len(pending),
                  "complete_lecture_coverage": False}
+    if selection_extra:
+        selection.update(selection_extra)
     plan = {"plan_version": PLAN_VERSION, "source_lines": selected, "groups": group_ids,
             "target_source_ids": target_ids, "through_seconds": through,
             "target_through_seconds": max(row["end_seconds"] for row in targets), "selection": selection,
@@ -261,6 +269,169 @@ def plan_translation(lines, covered_source_ids, *, flush=False):
     plan["plan_fingerprint"] = _hash(_core(plan))
     build_translation_request(plan)
     return plan
+
+
+def _looks_like_sentence_end(text):
+    """Conservative punctuation heuristic, not a claim of semantic completion.
+
+    Whole source rows remain indivisible. A sentence followed by an unfinished
+    clause in the same row therefore waits along with that clause.
+    """
+    tail = text.rstrip().rstrip('"\'”’)]}').rstrip()
+    if not tail or tail[-1] not in ".!?。！？":
+        return False
+    if re.search(r"(?:\.{2,}|…)[.!?。！？]*$", tail):
+        return False
+    word = re.search(r"([A-Za-z]+)[.!?。！？]+$", tail)
+    if word and word.group(1).lower() in {
+            "and", "or", "but", "because", "if", "unless", "although", "though",
+            "while", "when", "whether", "where", "whose", "which", "who", "that",
+            "to", "of", "with", "for", "from", "as", "than", "until"}:
+        return False
+    if tail.endswith("."):
+        if re.search(r"(?:^|[\s(])(?:[A-Za-z]\.|(?:[A-Za-z]+\.){2,})$", tail):
+            return False  # Initials and dotted abbreviations, such as A. or Ph.D.
+        token = re.search(r"([A-Za-z]+)\.$", tail)
+        if token and token.group(1).lower() in {
+                "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc",
+                "no", "fig", "eq", "vol", "dept", "inc", "ltd", "approx", "al",
+                "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
+                "oct", "nov", "dec"}:
+            return False
+    return True
+
+
+def plan_sentence_translation(lines, covered_source_ids, *, through_seconds,
+                              end_of_input=False, max_wait_seconds=30.0,
+                              lookahead_seconds=2.0, source_breaks=()):
+    """Plan a bounded FIFO prefix, holding unfinished whole source rows.
+
+    ``through_seconds`` is confirmed processed-ASR audio progress, including
+    recognized silence; wall time and capture progress must not advance it.
+    Sentence-looking row ends require that much observed lookahead in live
+    mode. A cap, excluded row, known failed-ASR interval, timeout, or final
+    drain may force a fragment, and its reason remains in the frozen plan.
+
+    ``ready_source_ids`` names this request's targets. Every other eligible
+    uncovered ID remains in ``waiting_source_ids``, including queued work past
+    the request limit. ``next_through_seconds`` describes the next audio-based
+    wakeup for a held tail, not a wall-clock completion estimate. No plan is a
+    normal wait and never confers coverage. This planner does no I/O.
+    """
+    if type(end_of_input) is not bool:
+        raise TranslationInputError("end_of_input must be a boolean")
+    through = _number(through_seconds, "through_seconds")
+    max_wait = _number(max_wait_seconds, "max_wait_seconds")
+    lookahead = _number(lookahead_seconds, "lookahead_seconds")
+    clean = _clean_lines(lines)
+    if any(row["end_seconds"] > through for row in clean):
+        raise TranslationInputError("source text extends beyond processed-ASR through_seconds")
+    if not isinstance(covered_source_ids, (list, tuple, set, frozenset)) or any(
+            not isinstance(identity, str) for identity in covered_source_ids):
+        raise TranslationInputError("covered_source_ids must be a collection of source IDs")
+    covered = set(covered_source_ids)
+    if not covered.issubset({row["id"] for row in clean}):
+        raise TranslationInputError("covered_source_ids contains an unknown source ID")
+    if not isinstance(source_breaks, (list, tuple)):
+        raise TranslationInputError("source_breaks must be a list or tuple of failed-ASR intervals")
+    breaks = []
+    for gap in source_breaks:
+        if not isinstance(gap, dict):
+            raise TranslationInputError("each source break must be an object")
+        start = _number(gap.get("start_seconds"), "source break start_seconds")
+        end = _number(gap.get("end_seconds"), "source break end_seconds")
+        if end < start:
+            raise TranslationInputError("source break end_seconds must be >= start_seconds")
+        breaks.append((start, end))
+    pending = [row for row in clean if _eligible(row) and row["id"] not in covered]
+    if not pending:
+        return {"plan": None, "ready_source_ids": [], "waiting_source_ids": [],
+                "next_through_seconds": None}
+
+    # Keep explicit source barriers even when the corresponding excluded row
+    # is empty or overlaps another row, and even when a failed interval is <5s.
+    runs, current, current_end = [], [], 0.0
+    for row in clean:
+        if not _eligible(row) or row["id"] in covered:
+            if current:
+                runs.append((current, True))
+                current = []
+            continue
+        if current:
+            if (row["start_seconds"] - current_end > MAX_GAP_SECONDS
+                    or any(start <= row["start_seconds"] and end >= current_end
+                           for start, end in breaks)):
+                runs.append((current, True))
+                current = []
+        current_end = max(current_end, row["end_seconds"]) if current else row["end_seconds"]
+        current.append(row)
+    if current:
+        # A known failure also severs the last visible continuation when there
+        # is no later recognized row. It is not ordinary silence or a clean
+        # final-input boundary, and its interval remains recorded below.
+        runs.append((current, any(end >= current_end for start, end in breaks)))
+
+    groups, boundaries, blocked, next_through = [], [], None, None
+    stop = False
+    for run, closed in runs:
+        remaining = run
+        while remaining and len(groups) < MAX_GROUPS:
+            candidate, size = [], 0
+            for row in remaining:
+                row_size = _text_bytes(row)
+                if (len(candidate) >= MAX_GROUP_LINES
+                        or size + row_size > MAX_GROUP_SOURCE_BYTES
+                        or max([row["end_seconds"]] + [item["end_seconds"] for item in candidate])
+                           - remaining[0]["start_seconds"] > MAX_GROUP_SECONDS):
+                    break
+                candidate.append(row)
+                size += row_size
+            if not candidate:
+                # Earlier ready work may still be saved before reporting the
+                # oversized row. Never skip it to translate later sources.
+                if not groups:
+                    raise OversizedSourceError(remaining[0]["id"])
+                blocked, stop = remaining[0]["id"], True
+                break
+            sentence_ends = [index + 1 for index, row in enumerate(candidate)
+                             if _looks_like_sentence_end(row["text"])
+                             and (end_of_input or row["end_seconds"] + lookahead <= through)]
+            if sentence_ends:
+                count, reason = sentence_ends[-1], "sentence"
+            elif len(candidate) < len(remaining):
+                count, reason = len(candidate), "limit"
+            elif closed:
+                count, reason = len(candidate), "source_gap"
+            elif end_of_input:
+                count, reason = len(candidate), "end_of_input"
+            elif through >= remaining[0]["end_seconds"] + max_wait:
+                count, reason = len(candidate), "timeout"
+            else:
+                wakeups = [remaining[0]["end_seconds"] + max_wait]
+                wakeups.extend(row["end_seconds"] + lookahead for row in candidate
+                               if _looks_like_sentence_end(row["text"])
+                               and row["end_seconds"] + lookahead > through)
+                next_through, stop = min(wakeups), True
+                break
+            group = candidate[:count]
+            groups.append(group)
+            boundaries.append({"source_ids": [row["id"] for row in group], "reason": reason})
+            remaining = remaining[count:]
+        if stop or len(groups) >= MAX_GROUPS:
+            break
+
+    ready_ids = [row["id"] for group in groups for row in group]
+    ready_set = set(ready_ids)
+    waiting_ids = [row["id"] for row in pending if row["id"] not in ready_set]
+    selection = {"policy": "sentence_aware_whole_rows_v1", "group_boundaries": boundaries,
+                 "end_of_input": end_of_input, "max_wait_seconds": max_wait,
+                 "lookahead_seconds": lookahead, "waiting_source_ids": waiting_ids,
+                 "next_through_seconds": next_through,
+                 "source_breaks": [{"start_seconds": start, "end_seconds": end} for start, end in breaks]}
+    plan = (_assemble_plan(clean, pending, groups, through=through, flush=end_of_input,
+                           blocked=blocked, selection_extra=selection) if groups else None)
+    return {"plan": plan, "ready_source_ids": ready_ids, "waiting_source_ids": waiting_ids,
+            "next_through_seconds": next_through}
 
 
 def build_translation_request(plan):

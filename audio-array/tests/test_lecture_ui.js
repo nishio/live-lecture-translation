@@ -312,6 +312,22 @@ async function run() {
   continuousState.analysis.result.block_translations = [{text: 'Old sampled translation', source_ids: ['line-1']}];
   continuousState.translation = {enabled: true, state: 'running', pending_lines: 2, excluded_uncertain_lines: 1, native_lines: 0,
     through_seconds: 12, generated_at: 960, error: null, blocks: [{id: 't1', text: '継続する文脈訳' + injected, source_ids: ['line-1'], start_seconds: 3, end_seconds: 12, generated_at: 959, published_at: 960}]};
+  const boundaryWait = appFixture();
+  const waitingState = structuredClone(continuousState);
+  waitingState.updated_at = clock;
+  waitingState.translation = {...waitingState.translation, state: 'waiting', wait_reason: 'continuation', worker_alive: false};
+  const originalWaiting = JSON.stringify(waitingState);
+  boundaryWait.state(waitingState); await boundaryWait.app.poll();
+  const waitingLabel = boundaryWait.$('translation-status').textContent;
+  assert.match(waitingLabel, /文の続き待ち/);
+  assert.equal(boundaryWait.$('translation-retry-button').hidden, true);
+  clock += 5; boundaryWait.app.renderStatus();
+  assert.equal(boundaryWait.$('translation-status').textContent, waitingLabel, 'Sentence wait does not count down on wall time');
+  clock += 20; boundaryWait.app.renderStatus();
+  assert.match(boundaryWait.$('translation-status').textContent, /状態不明/);
+  clock -= 25; boundaryWait.rejectState(true); await boundaryWait.app.poll();
+  assert.match(boundaryWait.$('translation-status').textContent, /状態不明/);
+  assert.equal(JSON.stringify(waitingState), originalWaiting, 'Rendering must not change received evidence');
   continuous.app.acceptState(continuousState);
   assert.equal(continuous.$('translation-heading').textContent, '文脈で訳し直し');
   assert.equal(continuous.$('translation-blocks').children[0].children[0].textContent, '継続する文脈訳' + injected, 'Continuous translations remain plain text');

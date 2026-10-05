@@ -406,7 +406,8 @@
       showText('translation-error', enabled ? text(translation.error) : '');
       if (!enabled) return;
       const labels = {idle: '待機', waiting: '待機', running: '翻訳中', completed: '処理済み', failed: '失敗・要確認', paused: '保留'};
-      const status = fresh ? (labels[translation.state] || '不明') : '状態不明';
+      const continuation = translation.state === 'waiting' && translation.wait_reason === 'continuation' && !translation.worker_alive;
+      const status = fresh ? (continuation ? '文の続き待ち' : (labels[translation.state] || '不明')) : '状態不明';
       const counts = [];
       for (const [key, label] of [['pending_lines', '未訳'], ['excluded_uncertain_lines', '不確か除外'], ['native_lines', '日本語']]) {
         if (number(translation[key])) counts.push(`${label} ${Math.max(0, translation[key])}行`);

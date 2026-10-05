@@ -34,6 +34,8 @@ ASSETS = Path(__file__).with_name('lecture-dashboard')
 MODEL_METADATA = REPO / 'data/event-audio/model-cache/whisper-turbo.json'
 ACTIVE = {'starting', 'recording', 'stalled', 'stopping'}
 OFFLINE_RECHECK_SECONDS = 30
+TRANSLATION_MAX_WAIT_SECONDS = 30.0
+TRANSLATION_LOOKAHEAD_SECONDS = 2.0
 
 
 class LectureOfflineError(RuntimeError):
@@ -97,6 +99,7 @@ def blank_state():
             'analysis': {'state': 'idle', 'through_seconds': 0, 'generated_at': None,
                          'provider': 'local', 'model': None, 'error': None, 'result': None},
             'translation': {'enabled': False, 'state': 'idle', 'blocks': [], 'pending_lines': 0,
+                'ready_lines': 0, 'waiting_lines': 0, 'wait_reason': None,
                 'excluded_uncertain_lines': 0, 'native_lines': 0, 'through_seconds': 0,
                 'error': None, 'generated_at': None, 'worker_alive': False,
                 'completion_confirmed': True, 'retry_required': False},
@@ -231,6 +234,9 @@ class LectureApp:
         self._analysis_last_source_id = None
         self._analysis_manual_required = False
         self._generation_offline = {'analysis': False, 'translation': False}
+        self._translation_boundary_cache = None
+        self._translation_retry_job = None
+        self._translation_manual_admitted = False
         self.source_done = threading.Event()
         self.stop_source = threading.Event()
         self.retry_event = threading.Event()
@@ -289,6 +295,33 @@ class LectureApp:
     def _continuous_enabled(self):
         return bool(self.state.get('translation', {}).get('enabled'))
 
+    def _translation_input_finished(self):
+        # An empty queue can still have a chunk in the recognizer.
+        return (self.source_done.is_set() and self.audio_queue.empty()
+                and self.state['asr']['state'] != 'running')
+
+    def _translation_readiness_locked(self, finished, *, refresh=False):
+        """Cache pure boundary planning while append-only source evidence is unchanged."""
+        from lecture_translation import plan_sentence_translation
+        rows = self.state['lines']
+        translation = self.state['translation']
+        failures = self.state['asr'].get('failed_chunks', [])
+        breaks = tuple((row['start_seconds'], row['end_seconds']) for row in failures)
+        key = (id(rows), len(rows), rows[-1]['id'] if rows else None,
+               len(translation['blocks']), self.state['asr']['through_seconds'], finished, breaks)
+        if refresh or self._translation_boundary_cache is None or self._translation_boundary_cache[0] != key:
+            covered = {identity for block in translation['blocks'] for identity in block['source_ids']}
+            readiness = plan_sentence_translation(rows, covered,
+                through_seconds=self.state['asr']['through_seconds'], end_of_input=finished,
+                max_wait_seconds=TRANSLATION_MAX_WAIT_SECONDS,
+                lookahead_seconds=TRANSLATION_LOOKAHEAD_SECONDS,
+                source_breaks=[{'start_seconds': start, 'end_seconds': end} for start, end in breaks])
+            self._translation_boundary_cache = (key, readiness)
+        readiness = self._translation_boundary_cache[1]
+        translation.update(ready_lines=len(readiness['ready_source_ids']),
+                           waiting_lines=len(readiness['waiting_source_ids']))
+        return readiness
+
     def _refresh_translation_locked(self):
         translation = self.state.setdefault('translation', deepcopy(blank_state()['translation']))
         covered = {identity for block in translation['blocks'] for identity in block['source_ids']}
@@ -300,9 +333,22 @@ class LectureApp:
             native_lines=sum(bool(str(line.get('text', '')).strip()) and not line.get('uncertain')
                              and line.get('language') == 'ja' for line in lines),
             worker_alive=bool(self.cloud_worker and self.cloud_worker.is_alive() and self.cloud_kind == 'translation'))
+        translation['wait_reason'] = None
+        if not pending:
+            translation.update(ready_lines=0, waiting_lines=0)
         if translation['enabled'] and pending and translation['state'] == 'completed':
             translation['state'] = 'waiting'
         translation['completion_confirmed'] = not translation['worker_alive'] and translation['state'] != 'running'
+        if translation['enabled'] and pending and self.result_dir is not None:
+            from lecture_translation import TranslationInputError
+            try:
+                readiness = self._translation_readiness_locked(self._translation_input_finished())
+                if (readiness['plan'] is None and translation['state'] not in {'running', 'failed', 'paused'}
+                        and not translation['worker_alive'] and not translation['retry_required']
+                        and self._translation_retry_job is None and not self._generation_offline['translation']):
+                    translation['wait_reason'] = 'continuation'
+            except TranslationInputError:
+                translation.update(ready_lines=None, waiting_lines=None)
         return pending, covered
 
     def persist(self, *, force=False):
@@ -394,6 +440,9 @@ class LectureApp:
             self._analysis_last_source_id = None
             self._analysis_manual_required = False
             self._generation_offline = {'analysis': False, 'translation': False}
+            self._translation_boundary_cache = None
+            self._translation_retry_job = None
+            self._translation_manual_admitted = False
             self.state['message'] = '保存済み音声の逐次再生試験です。' if replay else 'マイクを起動しています。'
             self.recorder = None
             self.worker = self.source_thread = None
@@ -405,6 +454,8 @@ class LectureApp:
                     'chunk_seconds': self.chunk_seconds, 'analysis_interval': self.analysis_interval,
                     'continuous_translation': self.continuous_translation,
                     'translation_interval': self.translation_interval,
+                    'translation_max_wait_seconds': TRANSLATION_MAX_WAIT_SECONDS,
+                    'translation_lookahead_seconds': TRANSLATION_LOOKAHEAD_SECONDS,
                     'replay': bool(replay), 'pace': pace if replay else None})
                 self.cloud_baseline_keys = set()
                 if provider == 'openai':
@@ -573,6 +624,7 @@ class LectureApp:
                 raise ValueError('未翻訳の対象原文がありません。')
             if self.cloud_worker is not None:
                 raise RuntimeError('翻訳または分析がすでに進行中です。')
+            self._translation_manual_admitted = True
             self.translation_retry_event.set()
             if not self.worker or not self.worker.is_alive():
                 self.worker_finishing = False
@@ -690,15 +742,19 @@ class LectureApp:
             self._start_cloud_job('analysis', job, manual_retry)
 
     def _prepare_translation(self):
-        from lecture_translation import plan_translation
         with self.lock:
             if self.closing or self.abort_processing.is_set() or not self._continuous_enabled():
                 return None
-            _, covered = self._refresh_translation_locked()
-            plan = plan_translation(deepcopy(self.state['lines']), covered, flush=True)
+            self._refresh_translation_locked()
+            if self._translation_retry_job is not None:
+                # A failed/prechecked request keeps its frozen input even when
+                # later source arrives. Explicit retry admission survives offline waits.
+                self.state['translation'].update(state='running', error=None, retry_required=False, wait_reason=None)
+                return self._translation_retry_job
+            plan = self._translation_readiness_locked(self._translation_input_finished(), refresh=True)['plan']
             if plan is None:
                 return None
-            self.state['translation'].update(state='running', error=None, retry_required=False)
+            self.state['translation'].update(state='running', error=None, retry_required=False, wait_reason=None)
             return {'plan': deepcopy(plan), 'session': deepcopy(self.state['session']),
                     'result_dir': self.result_dir, 'model': self.state['analysis']['model'],
                     'started_at': time.time()}
@@ -741,7 +797,8 @@ class LectureApp:
                         for key in ('text', 'start_seconds', 'end_seconds', 'language', 'uncertain')):
                     raise TranslationResponseError('翻訳中に対象原文が変化しました。')
             additions = []
-            for block in blocks:
+            boundaries = plan['selection'].get('group_boundaries', [])
+            for index, block in enumerate(blocks):
                 rows = [source[identity] for identity in block['source_ids']]
                 stable = json.dumps([job['session']['id'], block['source_ids']], ensure_ascii=False).encode()
                 additions.append({'id': 'tr-' + hashlib.sha256(stable).hexdigest()[:24],
@@ -749,11 +806,17 @@ class LectureApp:
                     'start_seconds': min(row['start_seconds'] for row in rows),
                     'end_seconds': max(row['end_seconds'] for row in rows),
                     'generated_at': result.get('generated_at', published), 'published_at': published})
+                if index < len(boundaries):
+                    additions[-1]['boundary_reason'] = boundaries[index]['reason']
             # The history is durable before coverage advances. A write failure
             # retains every pending source ID and never silently skips a batch.
             append_json(job['result_dir'] / 'translation-history.jsonl',
-                        {**result, 'blocks': additions, 'started_at': job['started_at'], 'published_at': published})
+                        {**result, 'selection': deepcopy(plan['selection']), 'blocks': additions,
+                         'started_at': job['started_at'], 'published_at': published})
             self.state['translation']['blocks'].extend(additions)
+            # Coverage is already durable. Later measurement/status failures
+            # must not make a retry request these same source IDs again.
+            self._translation_retry_job = None
             self.state['translation'].update(state='completed', error=None, retry_required=False,
                 generated_at=published, through_seconds=max(self.state['translation']['through_seconds'],
                     max(block['end_seconds'] for block in additions)))
@@ -787,6 +850,8 @@ class LectureApp:
                 raise RuntimeError('翻訳または分析がすでに進行中です。')
             self._cloud_outcome = None
             self.cloud_kind = kind
+            if kind == 'translation':
+                self._translation_retry_job = job
             def generate():
                 error = None
                 try:
@@ -867,6 +932,11 @@ class LectureApp:
         self._generation_offline[kind] = isinstance(outcome['error'], LectureOfflineError)
         if kind == 'analysis':
             self._analysis_manual_required = bool(outcome['error']) and not self._generation_offline[kind]
+        elif outcome['error'] is None:
+            self._translation_retry_job = None
+            self._translation_manual_admitted = False
+        elif not self._generation_offline[kind]:
+            self._translation_manual_admitted = False
 
     def _continuous_step(self, finished, newest):
         """Schedule one generation fairly; retain failures and their pending IDs."""
@@ -882,6 +952,14 @@ class LectureApp:
                 'translation': bool(pending) and (manual['translation'] or not self.state['translation']['retry_required']),
                 'analysis': bool(newest) and (manual['analysis'] or (not self._analysis_manual_required
                     and (newest != self._analysis_last_source_id or self._generation_offline['analysis'])))}
+            if wants['translation'] and self._translation_retry_job is None:
+                from lecture_translation import TranslationInputError
+                try:
+                    wants['translation'] = self._translation_readiness_locked(finished)['plan'] is not None
+                except TranslationInputError:
+                    # Preparation records malformed input as a failure. Status
+                    # and eligibility checks never hide the pending source.
+                    pass
             due = {}
             for kind, interval in (('translation', self.translation_interval), ('analysis', self.analysis_interval)):
                 elapsed = now - self._generation_last_started[kind]
@@ -898,14 +976,15 @@ class LectureApp:
             event = self.translation_retry_event if kind == 'translation' else self.retry_event
             requested = event.is_set()
             event.clear()
-            self._generation_last_started[kind] = now
-            self._generation_last_kind = kind
-            if kind == 'analysis':
-                self._analysis_last_source_id = newest
             try:
                 job = self._prepare_translation() if kind == 'translation' else self._prepare_analysis()
                 if job is not None:
-                    self._start_cloud_job(kind, job, requested)
+                    retry = requested or (kind == 'translation' and self._translation_manual_admitted)
+                    self._start_cloud_job(kind, job, retry)
+                    self._generation_last_started[kind] = now
+                    self._generation_last_kind = kind
+                    if kind == 'analysis':
+                        self._analysis_last_source_id = newest
             except Exception as exc:
                 failure = self._translation_failed if kind == 'translation' else self._analysis_failed
                 failure(exc)

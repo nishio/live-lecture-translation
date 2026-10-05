@@ -25,6 +25,8 @@ The first recognition can take longer while the model initializes. The default 1
 
 Translations are queued on a nominal 60-second schedule and understanding support on a nominal 120-second schedule. One cloud request runs at a time. These intervals are not end-to-end latency promises. Pending translation counts and failure states are more informative than waiting for a particular wall-clock second.
 
+「文の続き待ち」 means the untranslated tail has no usable row-end boundary yet; it does not consume another 60-second interval. The planner prefers sentence-like row endings after at least two seconds of processed audio beyond them. New recognition normally arrives in 15-second chunks, so this is not a two-second display promise. If no boundary appears after 30 seconds of further processed audio from the oldest pending row's end, or a size limit/source gap prevents joining, a fragment can be translated with its reason saved. An input or recognition stall does not expire that audio-based wait. Stop waits for remaining recognition before translating the final eligible fragments. These heuristics do not guarantee correct sentence boundaries or translation quality.
+
 ## Read without losing your place
 
 New source text appears in the left column. Translation and understanding support remain on the right. Follow a source reference to inspect its recognized speech and time. Holding a view or choosing an earlier result does not stop capture or processing.

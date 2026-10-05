@@ -11,6 +11,18 @@ The [authorized 325.567-second comparison](../docs/experiments/asr-chunk-duratio
 
 The [architecture](../docs/architecture.md) remains authoritative for current live behavior. The [probe guide](../docs/asr-probe.md) describes explicit saved-audio experiments.
 
+## Translation boundaries before provisional-ASR integration
+
+Source inspection showed that the continuous translator used `flush=True` for every request. Its capacity-only planner did not detect sentence completion: even `flush=False` would release unfinished text at a group limit or an excluded source row. Holding only the newest segment would also miss sentences split by internal request groups. ASR stability, sentence completeness, recognition uncertainty and request cadence are separate properties.
+
+The first implementation keeps existing immutable source rows and adds a pure boundary planner before the shared translation adapter. Each capped group backs up to a sentence-like row end where possible; otherwise the tail waits. Common abbreviations, initials, ellipses and dangling connectives are excluded from this punctuation heuristic. The live lookahead threshold is two seconds of successfully processed audio after a candidate row end. It does not establish stability through repeated recognition, and with 15-second ASR chunks the observation delay is not necessarily two seconds.
+
+The timeout threshold is 30 seconds of processed-ASR progress after the oldest unresolved row ends, not elapsed wall time or incoming capture duration. Limits, source barriers, known failed recognition spans, this timeout and end-of-input drain can release explicit fragments. The frozen selection and persisted blocks record why each boundary was chosen; fragments must not be represented as proof of a complete sentence. Failed recognition remains failed even when all eligible earlier text has been translated. Oversized rows remain pending with an explicit failure.
+
+No-ready planning is a normal continuation wait. It neither calls the model nor advances the generation cadence, and the UI uses a static 「文の続き待ち」 indication. The last recognizer must finish before final drain; retry jobs remain frozen and history must be saved before coverage advances. Once history and coverage are saved, a later measurement or cost-report failure must remain visible without retaining the saved translation as a retry target. These lifecycle rules are covered with synthetic fixtures and providers, independently of recognition or Japanese quality.
+
+Whole-row coverage deliberately holds a row such as a complete sentence followed by an unfinished clause in full. Translating only its completed prefix requires immutable source revisions plus character spans or derived unit IDs. The next ASR stage should connect the provisional buffer and longer re-recognition to that evidence contract, without changing text behind existing IDs. The two- and thirty-second thresholds need matched evaluation using actual publication events; no new model or live-comprehension improvement is established by the implementation.
+
 ## Uncertainty and translation eligibility are separate decisions
 
 After publishing the comparison, the user proposed filtering rule-identifiable junk from uncertain recognition and translating the remaining content with its uncertainty attached. The reason is semantic preservation: excessive uncertainty detection followed by blanket exclusion can remove a negation, condition, quantity, or qualification. This is a proposed policy, not a change to the live application.
