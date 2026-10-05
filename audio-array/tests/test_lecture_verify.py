@@ -9,8 +9,9 @@ import unittest
 import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lecture_verify import verify_session
+from lecture_verify import Audit, verify_session
 from lecture_analysis import _clean_lines
+from unittest.mock import patch
 
 
 def canonical(value):
@@ -88,6 +89,88 @@ def fixture(base, *, source_changes=None, reason_metadata=False):
 
 
 class LectureVerificationTests(unittest.TestCase):
+    def set_analysis_cost(self, result_dir, amount, *, cached_cost=None):
+        path = result_dir / "analysis-history.jsonl"
+        result = json.loads(path.read_text())
+        result["cost_usd"] = amount
+        result["cache_hit"] = cached_cost is not None
+        if cached_cost is not None:
+            result["cached_request_cost_usd"] = cached_cost
+        put(path, result)
+        put(result_dir / "analyses/first/result.json", result)
+        path = result_dir / "state.json"
+        state = json.loads(path.read_text())
+        state["analysis"]["result"] = result
+        put(path, state)
+
+    def test_successful_cost_includes_translation_history_without_recharging_cache(self):
+        for analysis_cost, cached_cost in ((0.02, None), (0.0, 8.0)):
+            with self.subTest(analysis_cost=analysis_cost), tempfile.TemporaryDirectory() as tmp:
+                result_dir, _ = fixture(Path(tmp))
+                self.set_analysis_cost(result_dir, analysis_cost, cached_cost=cached_cost)
+                rows = [{"cost_usd": 0.0079085, "cache_hit": False},
+                        {"cost_usd": 0.0, "cache_hit": True, "cached_request_cost_usd": 9.0},
+                        {"cost_usd": 0.010616, "cache_hit": False}]
+                (result_dir / "translation-history.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+                expected = analysis_cost + 0.0185245
+                put(result_dir / "cost-report.json", {"successful_generation_api_usd": expected})
+                before = {str(path): sha(path.read_bytes()) for path in Path(tmp).rglob("*") if path.is_file()}
+                report = verify_session(result_dir)
+                self.assertEqual([], report["errors"])
+                self.assertTrue(report["complete_verified"])
+                self.assertAlmostEqual(expected, report["cost_reference"]["successful_generation_api_usd"])
+                self.assertFalse(report["cost_reference"]["all_additional_api_cost_verified"])
+                self.assertEqual(before, {str(path): sha(path.read_bytes()) for path in Path(tmp).rglob("*") if path.is_file()})
+
+    def test_legacy_missing_translation_history_retains_analysis_only_aggregate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result_dir, _ = fixture(Path(tmp))
+            self.set_analysis_cost(result_dir, 0.03)
+            put(result_dir / "cost-report.json", {"successful_generation_api_usd": 0.03})
+            self.assertFalse((result_dir / "translation-history.jsonl").exists())
+            report = verify_session(result_dir)
+            self.assertEqual([], report["errors"])
+            self.assertEqual(0.03, report["cost_reference"]["successful_generation_api_usd"])
+
+    def test_translation_cost_cannot_be_omitted_from_saved_aggregate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result_dir, _ = fixture(Path(tmp))
+            put(result_dir / "translation-history.jsonl", {"cost_usd": 0.02})
+            report = verify_session(result_dir)
+            self.assertIn("successful_cost_aggregate_mismatch", {error["code"] for error in report["errors"]})
+            self.assertFalse(report["complete_verified"])
+
+    def test_invalid_successful_costs_fail_without_nonfinite_report_numbers(self):
+        for amount in ("0.02", True, -0.02, float("nan"), float("inf"), [], 10 ** 400):
+            with self.subTest(amount=amount), tempfile.TemporaryDirectory() as tmp:
+                result_dir, _ = fixture(Path(tmp))
+                put(result_dir / "translation-history.jsonl", {"cost_usd": amount})
+                report = verify_session(result_dir)
+                self.assertIn("successful_cost_invalid", {error["code"] for error in report["errors"]})
+                self.assertFalse(report["complete_verified"])
+                json.dumps(report, allow_nan=False)
+
+    def test_translation_history_change_during_audit_stays_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result_dir, _ = fixture(Path(tmp))
+            path = result_dir / "translation-history.jsonl"
+            put(path, {"cost_usd": 0.02})
+            put(result_dir / "cost-report.json", {"successful_generation_api_usd": 0.02})
+            original_rows = Audit.rows
+            def rows_then_append(audit, supplied, snapshot):
+                rows = original_rows(audit, supplied, snapshot)
+                if supplied == path.resolve():
+                    with path.open("a") as stream:
+                        stream.write(json.dumps({"cost_usd": 0.03}) + "\n")
+                return rows
+            with patch.object(Audit, "rows", rows_then_append):
+                report = verify_session(result_dir)
+            self.assertEqual([], report["errors"])
+            self.assertEqual("snapshot", report["scope"])
+            self.assertFalse(report["complete_verified"])
+            self.assertTrue(report["concurrent_change_detected"])
+            self.assertIn("files_changed_during_verification", {row["code"] for row in report["warnings"]})
+
     def test_current_reason_metadata_matches_canonical_source_and_legacy_remains_valid(self):
         for current in (False, True):
             for changes in ({}, {"uncertain": True},

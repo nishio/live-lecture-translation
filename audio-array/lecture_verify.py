@@ -193,9 +193,9 @@ def verify_session(path):
                       processing_active_reported=processing_active,
                       scope="complete" if complete_candidate else "snapshot")
         snapshot = not complete_candidate
-        for candidate in (ledger_path, result_dir / "transcript.jsonl", result_dir / "analysis-history.jsonl"):
-            if candidate.exists():
-                tracked[candidate] = _signature(candidate)
+        for candidate in (ledger_path, result_dir / "transcript.jsonl", result_dir / "analysis-history.jsonl",
+                          result_dir / "translation-history.jsonl", result_dir / "cost-report.json"):
+            tracked[candidate] = _signature(candidate) if candidate.exists() else None
         chunks = audit.rows(ledger_path, snapshot)
         audit.check(ledger_path.is_file(), "chunk_ledger_missing")
         raw_size = raw_path.stat().st_size
@@ -388,7 +388,19 @@ def verify_session(path):
             audit.check(False, "completed_analysis_missing_result")
         report["analysis"] = {"snapshots": len(history), "source_integrity_checked": True,
                               "semantic_quality_verified": False}
-        successful_cost = sum(item.get("cost_usd") or 0 for item in history)
+        # Match the runtime cost report: both workloads contribute newly billed
+        # cost_usd. cached_request_cost_usd is historical, not a new charge.
+        translation_history = audit.rows(result_dir / "translation-history.jsonl", snapshot)
+        successful_cost = 0.0
+        for kind, records in (("analysis", history), ("translation", translation_history)):
+            for number, item in enumerate(records):
+                amount = item.get("cost_usd")
+                if amount is None:  # Preserve legacy absent/null cost records.
+                    amount = 0
+                valid = (type(amount) in (int, float) and 0 <= amount <= sys.float_info.max
+                         and _finite(successful_cost + amount))
+                if audit.check(valid, "successful_cost_invalid", stage=kind, record=number):
+                    successful_cost += amount
         cost_path = result_dir / "cost-report.json"
         if cost_path.exists():
             cost = audit.load(cost_path)
@@ -399,7 +411,8 @@ def verify_session(path):
                                     "all_additional_api_cost_verified": False,
                                     "authority": "shared cloud-budget.json ledger including failed and unknown reservations",
                                     "codex_usage": "unmeasured", "electricity": "unmeasured"}
-        changed = [str(path) for path, signature in tracked.items() if not path.exists() or _signature(path) != signature]
+        changed = [str(path) for path, signature in tracked.items()
+                   if (_signature(path) if path.exists() else None) != signature]
         if changed or state_path.read_bytes() != state_raw:
             report["scope"] = "snapshot"
             audit.warn("files_changed_during_verification", files=changed)
