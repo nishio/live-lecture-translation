@@ -75,12 +75,14 @@ Keep the Mac powered and awake during capture.
 
 ## Stop, take a break, or begin another lecture
 
-**The recording stop button does not stop API processing.** It ends new capture while saved audio, pending translations and final analysis continue, so API charges can occur afterward. Confirm each stage's completion. Connectivity waiting has no automatic cutoff: pending text may be sent when the connection returns later. The daily budget admission check is separate from a processing deadline.
+**When you have finished reading, press 「録音・処理を停止」 to stop recording and new recognition, translation and analysis work.** It does not translate the remaining backlog or add a final analysis. Connectivity waiting and automatic retries stop too; reconnecting later does not send the pending text.
 
-Closing the browser or tab does not stop capture or processing. To request application shutdown and leave remaining work pending, press `Ctrl-C` in its terminal. A cloud worker already started may still send or complete a request after shutdown is requested and incur a charge; submitted requests are not cancelled. Treat unconfirmed shutdown as unconfirmed, and inspect the saved state. Automatic resumption of pending work is not implemented.
+Saved audio and results remain available. The dashboard shows when audio saving or an already started operation is still finishing. Submitted API requests cannot be cancelled, so their results may still be saved and charged.
 
-- **A break within a lecture:** Same-session recording pause/resume is not available. Holding the reading view affects only the display; pausing automatic retries affects only the relevant retries. To omit a break from recording, stop, wait for remaining processing to end, then start a separate session. Earlier context is not carried over automatically.
-- **Another lecture:** After the previous capture and processing have ended, press the recording start button again in the same dashboard. It creates a new storage location and empty context while retaining the earlier files. Failed or pending work from the previous session is not resumed automatically. Daily spending and transmission allowances are not reset.
+Closing the browser or tab alone does not stop the application. To exit the application itself, stop first and then press `Ctrl-C` in its terminal.
+
+- **A break within a lecture:** Same-lecture recording pause/resume is not available yet. Stop, then start a separate recording when the start button becomes available. Earlier context is not carried over automatically. Holding the reading view affects only the display.
+- **Another lecture:** When the recording start button becomes available, press it in the same dashboard. It creates a new storage location and empty context while retaining earlier files. Previous pending work is not executed; daily spending and transmission allowances carry over.
 
 See the [operation guide](docs/operation.md#finish-before-closing) for the detailed stop states and limitations.
 
@@ -110,7 +112,6 @@ This application is experimental.
 - Meaningful uncertain recognition remains eligible for translation and analysis with its uncertainty reasons; a translation does not establish that the speech was heard correctly. Some fillers and repeated text are omitted from translation, while the original text and exclusion reasons remain saved.
 - An earlier version had [5 hours 16 minutes 36.864 seconds of real Mac microphone field use](docs/experiments/development-handoff.md#long-microphone-field-use). Recognition reached the end of the saved audio, but capture ended on input loss and translation/analysis failed with HTTP 429, leaving 131 eligible lines untranslated. This is long-session experience with unresolved failures.
 - Separately, an [accelerated six-hour synthetic storage test](docs/experiments/README.md#accelerated-capture-storage) verified all 1,441 chunks. It was not six hours of real-time microphone operation. Mac battery endurance, accuracy in adverse acoustics, recovery performance and improvements in comprehension while listening remain unmeasured.
-- Automatic recovery of unfinished work after the application exits is not implemented.
 
 See [experiment records](docs/experiments/README.md) for detailed conditions and results. Translation trials using saved recognition output cannot establish fresh microphone capture performance, recognition accuracy, or speech-to-screen latency. See the [v0.9.0 release notes](docs/release-0.9.md) for that release's features and validation scope.
 

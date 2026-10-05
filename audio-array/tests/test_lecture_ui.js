@@ -47,6 +47,8 @@ async function run() {
   assert.equal(getControlState(snapshot({processing_active: true, asr: {state: 'paused'}}), true, clock, true, null).startDisabled, true, 'Unconfirmed worker exit blocks new recordings even if recognition is paused');
   assert.equal(getControlState(snapshot({capture: {state: 'stalled'}}), true, clock, true, null).startDisabled, true);
   assert.equal(getControlState(snapshot({capture: {state: 'stalled'}}), true, clock, true, null).stopDisabled, false, 'Stalled audio is still stoppable');
+  assert.equal(getControlState(snapshot({session: {id: 'draining'}, capture: {state: 'completed'}, processing_active: true}), true, clock, true, null).stopDisabled, false, 'Pending processing remains stoppable after capture ends');
+  assert.equal(getControlState(snapshot({processing_stop_requested: true, processing_stop_status: 'stopping'}), true, clock, true, null).startDisabled, true, 'Unconfirmed stop blocks a new session even after worker flags clear');
   assert.equal(capturePresentation(snapshot({capture: {state: 'stalled'}}), true, clock).label, '入力途絶・要確認');
   assert.equal(translationMap(snapshot({lines: [{id: 'a', translation_ja: '保存済み'}], analysis: {result: {translations: [{source_id: 'a', text: '旧訳'}, {source_id: 'b', text: '新訳'}]}}})).get('a'), '保存済み');
 
@@ -857,6 +859,88 @@ async function run() {
   release(response({ok: true})); await start;
   assert.equal(action.$('stop-button').disabled, false);
   assert.deepEqual(JSON.parse(action.calls.find(call => call.url === '/api/start').init.body), {device: '1', language: 'auto', provider: 'local'});
+
+  const stopping = appFixture(); await stopping.app.loadDevices();
+  const beforeStop = snapshot({session: {id: 'stop-session', source_kind: 'microphone'},
+    processing_active: true, processing_stop_requested: false, processing_stop_status: null,
+    capture: {state: 'recording', last_audio_at: clock, audio_seconds: 80},
+    asr: {state: 'completed', through_seconds: 75, queue_seconds: 5, schedule: {state: 'waiting', reason: 'interval', remaining_seconds: 10, wait_seconds: 15}},
+    translation: {enabled: true, state: 'failed', retry_required: true, error: 'Previous translation failure',
+      schedule: {state: 'waiting', reason: 'retry', remaining_seconds: 4, wait_seconds: 10}},
+    analysis: {state: 'failed', provider: 'openai', error: 'Previous analysis failure', schedule: {state: 'blocked', reason: 'manual_retry'}},
+    lines: [{id: 'kept', start_seconds: 0, end_seconds: 15, text: 'Saved before stop.', translation_ja: '停止前に保存した訳。', language: 'en'}]});
+  stopping.app.acceptState(beforeStop);
+  assert.equal(stopping.$('stop-button').textContent, '録音・処理を停止');
+  assert.equal(stopping.$('retry-button').hidden, false);
+  assert.equal(stopping.$('translation-pause-retries').hidden, false);
+  const savedReading = stopping.$('transcript').textContent;
+  let releaseStop;
+  stopping.post(() => new Promise(resolve => {releaseStop = resolve;}));
+  const stopTask = stopping.app.recordAction('stop');
+  await stopping.app.recordAction('stop');
+  assert.equal(stopping.calls.filter(call => call.url === '/api/stop').length, 1, 'A stop POST cannot be duplicated before its response');
+  assert.equal(stopping.$('stop-button').disabled, true);
+  assert.equal(stopping.$('start-button').disabled, true);
+  assert.match(stopping.$('stop-button').textContent, /要求中/);
+  assert.equal(stopping.$('retry-button').hidden, true);
+  assert.equal(stopping.$('translation-retry-button').hidden, true);
+  assert.equal(stopping.$('translation-pause-retries').hidden, true, 'A pending stop hides automatic retry controls immediately');
+  assert.equal(stopping.$('translation-schedule-compact').textContent, '停止確認中');
+  assert.match(stopping.$('asr-schedule-ring').style.background, / 0deg/);
+  await stopping.app.retryAnalysis(); await stopping.app.retryTranslation(); await stopping.app.pauseRetries('translation');
+  assert.equal(stopping.calls.filter(call => call.init.method === 'POST').length, 1, 'Retry actions cannot race a pending stop');
+  const awaitingStop = structuredClone(beforeStop);
+  awaitingStop.processing_stop_requested = true; awaitingStop.processing_stop_status = 'stopping';
+  awaitingStop.capture.state = 'stopping'; awaitingStop.asr.state = 'paused';
+  awaitingStop.analysis = {state: 'running', provider: 'openai', worker_alive: true, schedule: {state: 'blocked', reason: 'stopped'}};
+  stopping.state(awaitingStop); releaseStop(response({ok: true})); await stopTask;
+  assert.match(stopping.$('session-message').textContent, /音声の保存を確認/);
+  assert.equal(stopping.$('capture-state').textContent, '保存完了を待機');
+  assert.equal(stopping.$('analysis-schedule-compact').textContent, '終了待ち', 'Already-started work is not presented as cancelled');
+  assert.match(stopping.$('setup-hint').textContent, /送信済み.*取り消せず.*料金/);
+  assert.doesNotMatch(stopping.$('action-message').textContent, /残りの認識・分析は続きます/);
+  assert.equal(stopping.$('start-button').disabled, true);
+  assert.equal(stopping.$('stop-button').disabled, true);
+  assert.equal(stopping.$('transcript').textContent, savedReading, 'Stopping preserves the text already being read');
+  const savedAudioWaiting = structuredClone(awaitingStop); savedAudioWaiting.capture.state = 'completed';
+  stopping.app.acceptState(savedAudioWaiting);
+  assert.equal(stopping.$('capture-state').textContent, '完了');
+  assert.match(stopping.$('session-message').textContent, /開始した処理の終了/);
+  const fullyStopped = structuredClone(savedAudioWaiting);
+  fullyStopped.processing_active = false; fullyStopped.processing_stop_status = 'stopped';
+  fullyStopped.asr.completion_confirmed = false;
+  fullyStopped.analysis = {state: 'paused', provider: 'openai', completion_confirmed: false, schedule: {state: 'blocked', reason: 'stopped'}};
+  stopping.app.acceptState(fullyStopped);
+  assert.equal(stopping.$('start-button').disabled, false, 'A confirmed stop permits a new session despite retained unfinished work');
+  assert.equal(stopping.$('stop-button').textContent, '停止済み');
+  assert.match(stopping.$('session-message').textContent, /未処理分は残しています/);
+  assert.equal(stopping.$('asr-state').textContent, '停止・未処理あり');
+  assert.equal(stopping.$('analysis-schedule-compact').textContent, '停止');
+  assert.match(stopping.$('processing-overview').textContent, /文字起こし未処理/);
+  assert.doesNotMatch(stopping.$('processing-overview').textContent, /文字起こし未確認/);
+  assert.match(stopping.$('translation-error').textContent, /Previous translation failure/, 'Stopping does not erase a prior failure');
+  await stopping.app.retryAnalysis(); await stopping.app.retryTranslation(); await stopping.app.pauseRetries('analysis');
+  assert.equal(stopping.calls.filter(call => call.init.method === 'POST').length, 1, 'Stopped work cannot be restarted by hidden retry handlers');
+  const stoppedAfterCaptureFailure = structuredClone(fullyStopped);
+  stoppedAfterCaptureFailure.capture = {...fullyStopped.capture, state: 'failed', error: 'PCM input stopped'};
+  stopping.app.acceptState(stoppedAfterCaptureFailure);
+  assert.equal(stopping.$('capture-state').textContent, '失敗・要確認');
+  assert.equal(stopping.$('capture-error').textContent, 'PCM input stopped');
+  assert.match(stopping.$('session-message').textContent, /録音・保存は失敗/);
+  assert.match(stopping.$('processing-overview').textContent, /録音失敗/, 'A confirmed processing stop never relabels capture failure as successful saving');
+  stopping.app.acceptState({...beforeStop, session: {...beforeStop.session, id: 'next-session'}});
+  assert.equal(stopping.$('retry-button').hidden, false, 'A new session has its own retry controls');
+  assert.equal(stopping.$('stop-button').disabled, false);
+
+  const lostStop = appFixture(); await lostStop.app.loadDevices(); lostStop.app.acceptState(beforeStop);
+  lostStop.post(() => {throw new Error('stop response lost');}); lostStop.rejectState(true);
+  await lostStop.app.recordAction('stop');
+  assert.equal(lostStop.$('stop-button').disabled, true, 'An unconfirmed stop remains locked through a disconnect');
+  assert.equal(lostStop.$('translation-retry-button').hidden, true);
+  assert.match(lostStop.$('connection-warning').textContent, /停止を意味しません/);
+  lostStop.rejectState(false); lostStop.state(fullyStopped); await lostStop.app.poll();
+  assert.equal(lostStop.$('stop-button').textContent, '停止済み');
+  assert.equal(lostStop.calls.filter(call => call.url === '/api/stop').length, 1);
 
   const lost = appFixture(); await lost.app.loadDevices(); await lost.app.poll();
   lost.post(() => {throw new Error('response lost');}); lost.rejectState(true);

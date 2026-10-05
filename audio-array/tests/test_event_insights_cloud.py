@@ -1,4 +1,5 @@
 import hashlib
+from contextlib import contextmanager
 import io
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ from urllib.error import HTTPError, URLError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import event_insights_cloud as cloud
 import event_insights as insights
+from processing_control import ProcessingStopped, processing_scope
 
 
 MESSAGES = [{"role": "system", "content": "Return JSON."}, {"role": "user", "content": "synthetic"}]
@@ -30,6 +32,146 @@ def response(usage=True, model=None):
 
 
 class CloudInsightsTest(unittest.TestCase):
+    def test_stopped_before_or_during_ledger_wait_never_reserves_or_sends(self):
+        stop = threading.Event()
+        stop.set()
+        with processing_scope(stop), patch.object(cloud, '_post') as post:
+            with self.assertRaises(ProcessingStopped):
+                self.generate()
+        post.assert_not_called()
+        self.assertEqual({}, cloud._load_ledger()['requests'])
+
+        stop.clear()
+        real_lock = cloud._locked_ledger
+
+        @contextmanager
+        def waited_lock():
+            with real_lock() as ledger:
+                stop.set()
+                yield ledger
+
+        with processing_scope(stop), patch.object(cloud, '_locked_ledger', waited_lock), \
+                patch.object(cloud, '_post') as post:
+            with self.assertRaises(ProcessingStopped):
+                self.generate()
+        post.assert_not_called()
+        self.assertEqual({}, cloud._load_ledger()['requests'])
+
+    def test_stop_during_reservation_records_unsent_without_erasing_history(self):
+        stop = threading.Event()
+        real_write = cloud._atomic_json
+
+        def stop_after_reservation(path, data):
+            real_write(path, data)
+            if path.name == 'cloud-budget.json' and any(
+                    entry['state'] == 'reserved' for entry in data['requests'].values()):
+                stop.set()
+
+        with processing_scope(stop), patch.object(cloud, '_atomic_json', stop_after_reservation), \
+                patch.object(cloud, '_post') as post:
+            with self.assertRaises(ProcessingStopped):
+                self.generate()
+        post.assert_not_called()
+        cancelled = cloud._load_ledger()['requests']
+        entry = next(iter(cancelled.values()))
+        self.assertEqual('cancelled_unsent', entry['state'])
+        self.assertEqual(0, entry['charged_nanodollars'])
+        self.assertGreater(entry['reserved_nanodollars'], 0)
+        self.assertEqual({'category': 'cancelled', 'retryable': False, 'request_sent': False}, entry['error'])
+        self.assertEqual(0, cloud.budget_status()['spent_usd'])
+        self.assertEqual(0, cloud.budget_status()['reserved_usd'])
+
+        # A later session may submit this input; the cancelled attempt remains
+        # separately identifiable and never turns into a charged request.
+        with processing_scope(threading.Event()), patch.object(cloud, '_post', return_value=response()):
+            self.generate()
+        after = cloud._load_ledger()['requests']
+        self.assertEqual(2, len(after))
+        for identity, item in cancelled.items():
+            self.assertEqual(item, after[identity])
+        self.assertEqual(['cancelled_unsent', 'completed'], [item['state'] for item in after.values()])
+
+    def test_unsent_retry_preserves_earlier_unknown_charge(self):
+        with patch.object(cloud, '_post', side_effect=cloud.CloudError('synthetic transport failure')):
+            with self.assertRaises(cloud.CloudError):
+                self.generate()
+        before = cloud._load_ledger()['requests']
+        stop = threading.Event()
+        real_write = cloud._atomic_json
+
+        def stop_after_reservation(path, data):
+            real_write(path, data)
+            if any(item['state'] == 'reserved' for item in data.get('requests', {}).values()):
+                stop.set()
+
+        with processing_scope(stop), patch.object(cloud, '_atomic_json', stop_after_reservation), \
+                patch.object(cloud, '_post') as post:
+            with self.assertRaises(ProcessingStopped):
+                self.generate(retry_failed=True)
+        post.assert_not_called()
+        after = cloud._load_ledger()['requests']
+        for identity, item in before.items():
+            self.assertEqual(item, after[identity])
+        self.assertEqual(['failed', 'cancelled_unsent'], [item['state'] for item in after.values()])
+        with patch.object(cloud, '_post') as post:
+            with self.assertRaises(cloud.CloudError):
+                self.generate()
+        post.assert_not_called()
+
+    def test_transport_checkpoint_prevents_send_after_request_preparation(self):
+        stop = threading.Event()
+        with processing_scope(stop), patch.object(cloud.request, 'build_opener') as factory:
+            opener = factory.return_value
+            factory.side_effect = lambda *args: (stop.set(), opener)[1]
+            with self.assertRaises(ProcessingStopped):
+                self.generate()
+        opener.open.assert_not_called()
+        entry = next(iter(cloud._load_ledger()['requests'].values()))
+        self.assertEqual('cancelled_unsent', entry['state'])
+        self.assertEqual(0, entry['charged_nanodollars'])
+
+    def test_stop_after_admission_still_settles_response_or_unknown_failure(self):
+        stop = threading.Event()
+
+        def dispatched(*args):
+            stop.set()
+            return response()
+
+        with processing_scope(stop), patch.object(cloud, '_post', side_effect=dispatched):
+            result = self.generate()
+        self.assertTrue(result['usage_confirmed'])
+        entry = next(iter(cloud._load_ledger()['requests'].values()))
+        self.assertEqual('completed', entry['state'])
+        self.assertGreater(entry['charged_nanodollars'], 0)
+
+        stop.clear()
+        with processing_scope(stop), patch.object(cloud, '_post', side_effect=dispatched):
+            with self.assertRaises(ProcessingStopped):
+                cloud.generate(MESSAGES + [{'role': 'user', 'content': 'other synthetic'}], SCHEMA,
+                               validate=json.loads,
+                               observe_response=lambda response: (_ for _ in ()).throw(ProcessingStopped()))
+        last = list(cloud._load_ledger()['requests'].values())[-1]
+        self.assertEqual('failed', last['state'])
+        self.assertGreater(last['charged_nanodollars'], 0)
+
+    def test_stop_during_sent_transport_failure_keeps_unknown_charge(self):
+        stop = threading.Event()
+
+        def dispatched(*args, **kwargs):
+            stop.set()
+            raise URLError('synthetic transport interruption')
+
+        with processing_scope(stop), patch.object(cloud.request, 'build_opener') as factory:
+            factory.return_value.open.side_effect = dispatched
+            with self.assertRaises(cloud.CloudError) as caught:
+                self.generate()
+        factory.return_value.open.assert_called_once()
+        self.assertEqual('transport', caught.exception.category)
+        entry = next(iter(cloud._load_ledger()['requests'].values()))
+        self.assertEqual('failed', entry['state'])
+        self.assertGreater(entry['charged_nanodollars'], 0)
+        self.assertEqual(entry['reserved_nanodollars'], entry['charged_nanodollars'])
+
     def test_http_failures_have_sanitized_retry_diagnostics(self):
         cases = [(429, 'rate_limit_exceeded', 'rate_limit', True),
                  (429, 'insufficient_quota', 'quota', False),

@@ -214,6 +214,84 @@ class ContinuousTest(unittest.TestCase):
         self.assertFalse(translator.call_args.kwargs['retry_failed'])
         self.assertEqual(0, app.snapshot()['translation']['pending_lines'])
 
+    def test_final_admitted_native_asr_does_not_leave_phantom_pending_translation(self):
+        entered, release = threading.Event(), threading.Event()
+        def transcribe(chunk, *args):
+            self.assertTrue(app.source_done.wait(3))
+            entered.set()
+            self.assertTrue(release.wait(5))
+            result = fake_asr(chunk, *args)
+            result['chunks'][0]['raw_result']['language'] = 'ja'
+            return result
+        translator = Mock(side_effect=fake_translation)
+        analyzer = Mock(side_effect=fake_analysis)
+        app = self.app(transcriber=transcribe, translator=translator, analyzer=analyzer)
+        app.start({'provider': 'openai'}, replay=self.wave(1), pace=0)
+        try:
+            self.assertTrue(entered.wait(3))
+            state = app.stop()
+            self.assertEqual('paused', state['translation']['state'])
+        finally:
+            release.set()
+            self.wait(app)
+        translator.assert_not_called()
+        analyzer.assert_not_called()
+        state = app.snapshot()
+        self.assertEqual('completed', state['asr']['state'])
+        self.assertEqual('completed', state['translation']['state'])
+        self.assertTrue(state['translation']['completion_confirmed'])
+        self.assertEqual(0, state['translation']['pending_lines'])
+        self.assertEqual('paused', state['analysis']['state'])
+        self.assertIsNone(state['analysis']['result'])
+
+    def test_stop_at_caught_up_boundary_keeps_completed_generation_evidence(self):
+        app = self.app()
+        app.start({'provider': 'openai'}, replay=self.audio, pace=0)
+        self.wait(app)
+        self.assertEqual('completed', app.state['analysis']['state'])
+        self.assertEqual('completed', app.state['translation']['state'])
+        # Model the source-finalization gap with no additional captured audio.
+        app.source_done.clear()
+        state = app.stop()
+        self.assertEqual('completed', state['analysis']['state'])
+        self.assertEqual('completed', state['translation']['state'])
+        self.assertEqual(0, state['translation']['pending_lines'])
+        app.source_done.set()
+        app.persist(force=True)
+        saved = json.loads((app.result_dir / 'state.json').read_text())
+        self.assertEqual('completed', saved['asr']['state'])
+        self.assertEqual('completed', saved['analysis']['state'])
+        self.assertEqual('completed', saved['translation']['state'])
+        self.assertEqual('stopped', saved['processing_stop_status'])
+
+    def test_stop_ends_offline_wait_without_new_attempts(self):
+        health = {'checks': [{'id': 'network', 'reachable': False}]}
+        readiness = Mock()
+        readiness.snapshot.side_effect = lambda: health
+        translator = Mock(side_effect=fake_translation)
+        analyzer = Mock(side_effect=fake_analysis)
+        app = self.app(readiness=readiness, translator=translator, analyzer=analyzer)
+        app.start({'provider': 'openai'}, replay=self.audio, pace=0)
+        self.until(lambda: app.snapshot()['translation']['state'] == 'waiting'
+                   and app.snapshot()['translation']['error'] is not None)
+        app.stop()
+        self.wait(app)
+        health['checks'][0]['reachable'] = True
+        self.assertFalse(app._continuous_step(True, app.state['lines'][-1]['id']))
+        app.cloud_scope.reserve.assert_not_called()
+        translator.assert_not_called()
+        analyzer.assert_not_called()
+        state = app.snapshot()
+        self.assertEqual('paused', state['translation']['state'])
+        self.assertEqual('stopped', state['processing_stop_status'])
+        for kind in ('analysis', 'translation'):
+            self.assertIsNone(state[kind]['schedule']['due_at'])
+            self.assertIsNone(state[kind]['schedule']['retry']['next_at'])
+        self.assertFalse(state['translation']['retry_required'])
+        for action in (app.retry_analysis, app.retry_translation):
+            with self.assertRaises(RuntimeError):
+                action()
+
     def test_close_timeout_keeps_translation_owned_without_publishing_future_jobs(self):
         entered, release = threading.Event(), threading.Event()
         self.addCleanup(release.set)
@@ -237,7 +315,7 @@ class ContinuousTest(unittest.TestCase):
         self.assertEqual(1, translator.call_count)
         self.assertTrue(app.close(.1))
 
-    def test_stop_drains_final_partial_chunk_after_inflight_translation(self):
+    def test_stop_retains_final_partial_and_pending_translation_after_inflight(self):
         entered, release = threading.Event(), threading.Event()
         self.addCleanup(release.set)
         through = []
@@ -254,13 +332,54 @@ class ContinuousTest(unittest.TestCase):
             self.until(lambda: app.snapshot()['capture']['audio_seconds'] >= 3.5)
             app.stop()
             app.source_thread.join(3)
-            self.until(lambda: app.snapshot()['asr']['through_seconds'] == 3.5)
+            self.assertLess(app.snapshot()['asr']['through_seconds'], 3.5)
+            self.assertEqual('stopping', app.snapshot()['processing_stop_status'])
         finally:
             release.set()
             self.wait(app)
-        self.assertEqual([1, 3.5], through)
-        self.assertEqual(0, app.snapshot()['translation']['pending_lines'])
+        self.assertEqual([1], through)
+        state = app.snapshot()
+        self.assertGreater(state['translation']['pending_lines'], 0)
+        self.assertEqual('paused', state['translation']['state'])
+        self.assertFalse(state['translation']['retry_required'])
+        self.assertFalse(state['translation']['completion_confirmed'])
+        self.assertEqual('stopped', state['processing_stop_status'])
+        self.assertEqual('stopped', state['translation']['schedule']['reason'])
+        self.assertEqual([], state['asr']['failed_chunks'])
+        self.assertGreater(app.audio_queue.qsize(), 0)
+        with self.assertRaises(RuntimeError):
+            app.retry_translation()
         self.assertEqual(112000, (app.session_dir / 'audio/raw.pcm').stat().st_size)
+
+    def test_stop_after_scope_reservation_blocks_unsent_translation(self):
+        entered, release = threading.Event(), threading.Event()
+        def reserve(*args):
+            if app.cloud_kind == 'translation':
+                entered.set()
+                self.assertTrue(release.wait(5))
+            return {'approved': True}
+        translator = Mock(side_effect=fake_translation)
+        def transcribe(chunk, *args):
+            self.assertTrue(app.source_done.wait(3))
+            return fake_asr(chunk, *args)
+        app = self.app(translator=translator, transcriber=transcribe)
+        app.cloud_scope.reserve.side_effect = reserve
+        app.start({'provider': 'openai'}, replay=self.audio, pace=0)
+        try:
+            self.assertTrue(entered.wait(3))
+            app.stop()
+        finally:
+            release.set()
+            self.wait(app)
+        translator.assert_not_called()
+        state = app.snapshot()
+        self.assertEqual('paused', state['translation']['state'])
+        self.assertEqual(3, state['translation']['pending_lines'])
+        self.assertFalse(state['translation']['retry_required'])
+        self.assertIsNone(state['translation']['schedule']['retry']['next_at'])
+        events = app.result_dir / 'generation-events.jsonl'
+        self.assertFalse(events.exists())
+        self.assertFalse((app.result_dir / 'translation-history.jsonl').exists())
 
     def test_translation_requests_count_in_cost_report_including_failed_reservation(self):
         import hashlib

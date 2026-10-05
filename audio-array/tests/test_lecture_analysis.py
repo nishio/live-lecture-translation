@@ -468,7 +468,7 @@ class SnapshotGenerationTest(unittest.TestCase):
                 patch.object(cloud, "generate") as remote:
             result = analysis.analyze_snapshot([line()], translation_ids=["a"], timeout=60)
         select.assert_called_once_with("qwen3:4b")
-        slot.assert_called_once_with("ollama", timeout=60)
+        slot.assert_called_once_with("ollama", timeout=60, cancel=None)
         self.assertEqual(60, api.call_args.kwargs["timeout"])
         self.assertEqual("local", result["provider"])
         self.assertEqual("qwen3:4b", result["model"])

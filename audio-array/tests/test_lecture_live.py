@@ -1,4 +1,5 @@
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import sys
 import tempfile
@@ -166,7 +167,7 @@ class LiveTest(unittest.TestCase):
         self.assertTrue(state['analysis']['completion_confirmed'])
         self.assertFalse(json.loads((app.result_dir / 'state.json').read_text())['processing_active'])
 
-    def test_stop_drains_final_partial_asr_and_analysis_after_blocked_cloud(self):
+    def test_stop_preserves_final_partial_without_new_asr_or_analysis(self):
         entered, release = threading.Event(), threading.Event()
         scope = Mock()
         scope.reserve.return_value = {'approved': True}
@@ -186,18 +187,154 @@ class LiveTest(unittest.TestCase):
                 time.sleep(.01)
             app.stop()
             app.source_thread.join(3)
-            deadline = time.monotonic() + 2
-            while app.snapshot()['asr']['through_seconds'] < 1.5 and time.monotonic() < deadline:
-                time.sleep(.01)
             self.assertEqual(1.5, app.snapshot()['capture']['audio_seconds'])
-            self.assertEqual(1.5, app.snapshot()['asr']['through_seconds'])
+            self.assertEqual(1, app.snapshot()['asr']['through_seconds'])
+            self.assertEqual('stopping', app.snapshot()['processing_stop_status'])
             self.assertTrue(app.worker.is_alive())
         finally:
             release.set()
             self.wait(app)
-        self.assertEqual([1, 1.5], through)
+        self.assertEqual([1], through)
         self.assertEqual(48000, (app.session_dir / 'audio/raw.pcm').stat().st_size)
-        self.assertEqual(1.5, app.snapshot()['analysis']['through_seconds'])
+        self.assertEqual(1, app.snapshot()['analysis']['through_seconds'])
+        self.assertEqual(1, app.audio_queue.qsize())
+        state = app.snapshot()
+        self.assertEqual('paused', state['asr']['state'])
+        self.assertEqual('paused', state['analysis']['state'])
+        self.assertEqual('stopped', state['processing_stop_status'])
+        self.assertFalse(state['analysis']['completion_confirmed'])
+        self.assertEqual('stopped', json.loads((app.result_dir / 'state.json').read_text())['processing_stop_status'])
+
+    def test_stop_finishes_only_inflight_asr_and_start_creates_fresh_session(self):
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+        def transcribe(chunk, *args):
+            calls.append(chunk['index'])
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return fake_asr(chunk, *args)
+        analyzer = Mock(side_effect=fake_analysis)
+        app = self.app(transcriber=transcribe, analyzer=analyzer)
+        app.start({'provider': 'local'}, replay=self.audio, pace=0)
+        try:
+            self.assertTrue(entered.wait(2))
+            app.source_thread.join(2)
+            old_id, old_dir = app.state['session']['id'], app.result_dir
+            state = app.stop()
+            self.assertTrue(state['processing_stop_requested'])
+            self.assertEqual('running', state['asr']['state'])
+            self.assertEqual('stopping', state['processing_stop_status'])
+            for operation in (app.retry_analysis, app.retry_translation):
+                with self.assertRaises(RuntimeError):
+                    operation()
+            with self.assertRaises(RuntimeError):
+                app.start({'provider': 'off'}, replay=self.audio, pace=0)
+        finally:
+            release.set()
+            self.wait(app)
+        self.assertEqual([0], calls)
+        analyzer.assert_not_called()
+        self.assertEqual(2, app.audio_queue.qsize())
+        self.assertEqual([], app.state['asr']['failed_chunks'])
+        self.assertFalse((old_dir / 'failed-chunks.jsonl').exists())
+        state = app.snapshot()
+        self.assertEqual('stopped', state['processing_stop_status'])
+        self.assertEqual('paused', state['asr']['state'])
+        self.assertEqual('stopped', state['asr']['schedule']['reason'])
+        self.assertEqual('stopped', state['analysis']['schedule']['reason'])
+        saved = json.loads((old_dir / 'state.json').read_text())
+        self.assertEqual('stopped', saved['processing_stop_status'])
+        app.start({'provider': 'off'}, replay=self.audio, pace=0)
+        self.wait(app)
+        self.assertNotEqual(old_id, app.state['session']['id'])
+        self.assertFalse(app.snapshot()['processing_stop_requested'])
+        self.assertEqual('completed', app.state['asr']['state'])
+        self.assertEqual(saved, json.loads((old_dir / 'state.json').read_text()))
+
+    def test_local_transcriber_checks_stop_after_slot_acquisition(self):
+        from processing_control import ProcessingStopped, processing_scope
+        event = threading.Event()
+        seen = []
+        @contextmanager
+        def slot(label, **options):
+            seen.append(options['cancel'])
+            event.set()
+            yield None
+        transcribe = live.LocalTranscriber()
+        transcribe.model = {'local_path': 'synthetic-unused-model'}
+        transcribe.identities = {}
+        mlx = Mock()
+        with patch('transcribe_local.read_mono', return_value=[]), \
+                patch('local_inference.inference_slot', slot), \
+                patch.dict(sys.modules, {'mlx_whisper': mlx}), processing_scope(event):
+            with self.assertRaises(ProcessingStopped):
+                transcribe({'path': self.audio}, self.root / 'unused.json', 'auto')
+        self.assertEqual([event], seen)
+        mlx.transcribe.assert_not_called()
+        self.assertFalse((self.root / 'unused.json').exists())
+
+    def test_frozen_job_cannot_run_with_new_session_stop_event(self):
+        from processing_control import ProcessingStopped
+        app = self.app()
+        app.start({'provider': 'off'}, replay=self.audio, pace=0)
+        self.wait(app)
+        job = app._prepare_analysis()
+        old_event = job['stop_event']
+        app.stop()
+        app.start({'provider': 'off'}, replay=self.audio, pace=0)
+        self.wait(app)
+        self.assertIsNot(old_event, app.abort_processing)
+        self.assertTrue(old_event.is_set())
+        self.assertFalse(app.abort_processing.is_set())
+        with self.assertRaises(ProcessingStopped):
+            app._analyze(prepared=job)
+
+    def test_stop_after_scope_reservation_blocks_unsent_analysis(self):
+        entered, release = threading.Event(), threading.Event()
+        def reserve(*args):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return {'approved': True}
+        scope = Mock()
+        scope.reserve.side_effect = reserve
+        analyzer = Mock(side_effect=fake_analysis)
+        app = self.app(analyzer=analyzer, allow_cloud=True, cloud_scope=scope)
+        app.start({'provider': 'openai'}, replay=self.audio, pace=0)
+        try:
+            self.assertTrue(entered.wait(3))
+            app.stop()
+        finally:
+            release.set()
+            self.wait(app)
+        analyzer.assert_not_called()
+        state = app.snapshot()
+        self.assertEqual('paused', state['analysis']['state'])
+        self.assertFalse(app.inference_unconfirmed)
+        self.assertIsNone(state['analysis']['schedule']['retry']['next_at'])
+        self.assertTrue((app.result_dir / 'cloud-scope.jsonl').exists())
+        self.assertFalse((app.result_dir / 'analysis-history.jsonl').exists())
+
+    def test_asr_cancelled_before_dispatch_keeps_chunk_pending(self):
+        from local_inference import InferenceCancelled
+        entered, release = threading.Event(), threading.Event()
+        def unsent(chunk, *args):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            raise InferenceCancelled('synthetic slot wait cancelled')
+        app = self.app(transcriber=unsent)
+        app.start({'provider': 'off'}, replay=self.audio, pace=0)
+        try:
+            self.assertTrue(entered.wait(2))
+            app.source_thread.join(2)
+            app.stop()
+        finally:
+            release.set()
+            self.wait(app)
+        self.assertEqual(3, app.audio_queue.qsize())
+        self.assertEqual(0, app.state['asr']['through_seconds'])
+        self.assertEqual([], app.state['asr']['failed_chunks'])
+        self.assertFalse((app.result_dir / 'failed-chunks.jsonl').exists())
+        self.assertEqual('paused', app.state['asr']['state'])
 
     def test_close_timeout_keeps_blocked_cloud_owned_and_stops_new_analysis(self):
         entered, release = threading.Event(), threading.Event()
@@ -404,6 +541,27 @@ class LiveTest(unittest.TestCase):
                 self.assertEqual(original, json.dumps(app.state, sort_keys=True))
                 self.assertIsNone(app.worker)
                 self.assertIsNone(app.result_dir)
+
+    def test_close_blocks_new_work_before_waiting_for_readiness(self):
+        readiness = Mock()
+        app = self.app(readiness=readiness)
+        observed = []
+        readiness.close.side_effect = lambda: observed.append((
+            app.abort_processing.is_set(), app.stop_source.is_set(), app.closing))
+        self.assertTrue(app.close(.1))
+        self.assertEqual([(True, True, True)], observed)
+
+    def test_stop_preserves_existing_asr_failures(self):
+        app = self.app(transcriber=Mock(side_effect=ValueError('synthetic ASR failure')))
+        app.start({'provider': 'off'}, replay=self.audio, pace=0)
+        self.wait(app)
+        failed = list(app.state['asr']['failed_chunks'])
+        records = (app.result_dir / 'failed-chunks.jsonl').read_text()
+        state = app.stop()
+        self.assertEqual('failed', state['asr']['state'])
+        self.assertEqual(failed, state['asr']['failed_chunks'])
+        self.assertEqual(records, (app.result_dir / 'failed-chunks.jsonl').read_text())
+        self.assertEqual('stopped', state['processing_stop_status'])
 
     def test_shutdown_reports_unfinished_work(self):
         entered, release = threading.Event(), threading.Event()

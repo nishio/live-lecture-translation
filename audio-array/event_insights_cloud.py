@@ -22,6 +22,8 @@ import time
 from urllib import error, request
 from zoneinfo import ZoneInfo
 
+from processing_control import ProcessingStopped, check_processing_allowed
+
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / "data/event-audio/dashboard"
@@ -231,7 +233,8 @@ def _load_ledger():
             if (not re.fullmatch(r"[0-9a-f]{64}", key) or not isinstance(item, dict)
                     or not isinstance(item.get("day"), str)
                     or type(item.get("charged_nanodollars")) is not int or item["charged_nanodollars"] < 0
-                    or item.get("state") not in {"reserved", "failed", "completed", "completed_usage_unknown"}):
+                    or item.get("state") not in {"reserved", "failed", "completed", "completed_usage_unknown",
+                                                 "cancelled_unsent"}):
                 raise ValueError()
         return data
     except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
@@ -313,6 +316,9 @@ def _post(payload, key, timeout):
                           headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
     opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
     try:
+        # This is the request admission boundary. Once admitted, the transport
+        # may finish after stop; do not discard its response or refund its cost.
+        check_processing_allowed()
         with opener.open(req, timeout=timeout) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except error.HTTPError as exc:
@@ -415,6 +421,7 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
     An optional observer receives the raw response before validation, only for a
     fresh request. Observer failures keep the reservation; cache hits do not call it.
     """
+    check_processing_allowed()
     if observe_response is not None and not callable(observe_response):
         raise CloudError("応答の記録先は呼び出し可能な関数で指定してください。")
     payload = build_payload(messages, schema, model)
@@ -431,6 +438,7 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
     estimate = (len(encoded) + 4096) * max(PRICES[model][k] for k in ("input", "cached", "write"))
     estimate += MAX_OUTPUT_TOKENS * PRICES[model]["output"]
     with _locked_ledger() as ledger:
+        check_processing_allowed()
         previous = [item for key, item in ledger["requests"].items()
                     if item.get("fingerprint", key) == fingerprint]
         if previous:
@@ -439,22 +447,28 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
                 # Revalidate after a software/schema change; no network retries.
                 checked = validate(cached["output_text"])
                 return {**cached, "result": checked, "cache_hit": True, **budget_status()}
-            if not retry_failed:
+            if not retry_failed and any(item["state"] != "cancelled_unsent" for item in previous):
                 raise CloudError("同じ入力は処理中または前回失敗済みです。自動では再送しません。失敗後は手動で再試行できます。")
             # An explicitly admitted retry reserves another complete attempt. The previous
             # failed/unknown request remains charged; never refund it to retry.
+            # Proven-unsent attempts do not require retry authorization, but
+            # still count toward unique attempt IDs so their history survives.
             identity = hashlib.sha256(f"{fingerprint}:{len(previous)}".encode()).hexdigest()
         day = _day()
         budget = _budget(day)
         if _spent(ledger, day) + estimate > budget:
             raise BudgetExceededError("本日のクラウド予算に収まらないため、送信を止めました。")
+        check_processing_allowed()
         ledger["requests"][identity] = {"day": day, "state": "reserved", "model": model,
                                         "fingerprint": fingerprint,
                                         "reserved_nanodollars": estimate, "charged_nanodollars": estimate,
                                         "pricing_date": PRICING_DATE}
         _atomic_json(STATE_DIR / "cloud-budget.json", ledger)
+    response_received = False
     try:
+        check_processing_allowed()
         response = _post(payload, key, timeout)
+        response_received = True
         if observe_response is not None:
             observe_response(response)
         returned_model = response.get("model", "") if isinstance(response, dict) else ""
@@ -479,11 +493,17 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
             _atomic_json(STATE_DIR / "cloud-budget.json", ledger)
         return {**cached, **budget_status()}
     except Exception as exc:
-        # Preserve the reservation even if we do not know whether the call ran.
+        # Only our pre-dispatch checkpoint proves a request was not sent.
+        # Every transport/validation failure and earlier uncertain attempt
+        # retains its own reservation, even if stop was requested meanwhile.
         with _locked_ledger() as ledger:
             entry = ledger["requests"][identity]
-            entry["state"] = "failed"
-            entry['error'] = exc.diagnostics() if isinstance(exc, CloudError) else {'category': 'invalid_response', 'retryable': False}
-            entry["charged_nanodollars"] = max(entry["charged_nanodollars"], entry["reserved_nanodollars"])
+            if isinstance(exc, ProcessingStopped) and not response_received:
+                entry.update(state="cancelled_unsent", charged_nanodollars=0,
+                             error={"category": "cancelled", "retryable": False, "request_sent": False})
+            else:
+                entry["state"] = "failed"
+                entry['error'] = exc.diagnostics() if isinstance(exc, CloudError) else {'category': 'invalid_response', 'retryable': False}
+                entry["charged_nanodollars"] = max(entry["charged_nanodollars"], entry["reserved_nanodollars"])
             _atomic_json(STATE_DIR / "cloud-budget.json", ledger)
         raise

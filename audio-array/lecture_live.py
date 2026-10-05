@@ -31,6 +31,9 @@ import wave
 import webbrowser
 
 from lecture_source_policy import SOURCE_POLICY_VERSION, plan_source_policy, source_metadata
+from local_inference import InferenceCancelled
+from processing_control import (ProcessingStopped, processing_scope,
+                                check_processing_allowed, current_cancel_event)
 
 REPO = Path(__file__).resolve().parents[1]
 ASSETS = Path(__file__).with_name('lecture-dashboard')
@@ -90,6 +93,7 @@ def save_runtime(destination, configuration):
                Path(__file__).with_name('event_insights.py'),
                Path(__file__).with_name('event_insights_cloud.py'),
                Path(__file__).with_name('local_inference.py'),
+               Path(__file__).with_name('processing_control.py'),
                Path(__file__).with_name('catchup_page.py'),
                Path(__file__).with_name('transcribe_local.py'), *ASSETS.glob('*')]
     hashes = {}
@@ -106,6 +110,7 @@ def save_runtime(destination, configuration):
 
 def blank_state():
     return {'schema_version': 1, 'updated_at': time.time(), 'session': None,
+            'processing_stop_requested': False, 'processing_stop_status': None,
             'capture': {'state': 'idle', 'audio_seconds': 0, 'last_audio_at': None,
                         'rms_dbfs': None, 'peak_dbfs': None, 'error': None},
             'asr': {'state': 'idle', 'through_seconds': 0, 'queue_seconds': 0, 'error': None,
@@ -204,6 +209,7 @@ class LocalTranscriber:
     def __call__(self, chunk, destination, language):
         from transcribe_local import read_mono, sha256
         from local_inference import inference_slot
+        check_processing_allowed()
         audio = read_mono(chunk['path'])
         if self.model is None:
             self.model = json.loads(self.metadata_path.read_text())
@@ -220,9 +226,11 @@ class LocalTranscriber:
         os.environ['HF_HUB_OFFLINE'] = '1'
         os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
         before = time.monotonic()
-        with inference_slot('lecture-asr'):
+        with inference_slot('lecture-asr', cancel=current_cancel_event()):
+            check_processing_allowed()
             acquired = time.monotonic()
             import mlx_whisper
+            check_processing_allowed()
             result = mlx_whisper.transcribe(audio, path_or_hf_repo=self.model['local_path'],
                 verbose=None, task='transcribe', language=None if language == 'auto' else language,
                 temperature=0., condition_on_previous_text=False, initial_prompt=None)
@@ -294,6 +302,7 @@ class LectureApp:
     def snapshot(self):
         with self.lock:
             self._refresh_translation_locked()
+            self._refresh_stopped_locked()
             schedules = {kind: self._schedule_locked(kind) for kind in ('analysis', 'translation')}
             result = deepcopy(self.state)
             result['updated_at'] = time.time()
@@ -306,7 +315,7 @@ class LectureApp:
                 (result['analysis']['provider'] == 'local' and result['analysis']['state'] == 'running'
                  and self.worker and self.worker.is_alive()))
             result['analysis']['completion_confirmed'] = (not result['analysis']['worker_alive'] and
-                result['analysis']['state'] != 'running' and not self.inference_unconfirmed)
+                result['analysis']['state'] not in {'running', 'paused'} and not self.inference_unconfirmed)
             analysis_lines = ([row for row in result['lines'] if not row.get('uncertain')]
                               if legacy_source_policy(result) else content_lines(result['lines']))
             result['analysis']['untranslated_lines'] = sum(1 for row in analysis_lines
@@ -339,6 +348,45 @@ class LectureApp:
                     result['cloud_scope'] = {'error': '本文送信の残り時間を確認できません。'}
             return result
 
+    def _refresh_stopped_locked(self):
+        if not self.state.get('processing_stop_requested') or self.result_dir is None:
+            return
+        asr = self.state['asr']
+        unprocessed_audio = (not self.audio_queue.empty()
+                             or asr['through_seconds'] < self.state['capture']['audio_seconds'])
+        remaining_audio = not self.source_done.is_set() or unprocessed_audio
+        if asr['state'] not in {'running', 'failed'}:
+            asr['state'] = 'paused' if remaining_audio or self.inference_unconfirmed else (
+                'failed' if asr['failed_chunks'] else 'completed')
+        for kind in ('analysis', 'translation'):
+            stage = self.state[kind]
+            enabled = stage['provider'] != 'off' if kind == 'analysis' else stage['enabled']
+            if kind == 'translation':
+                pending = bool(stage['pending_lines']) or unprocessed_audio
+                stage['retry_required'] = False
+            else:
+                pending = unprocessed_audio or any(row['end_seconds'] > stage['through_seconds']
+                    for row in content_lines(self.state['lines']))
+            if enabled and pending and stage['state'] not in {'running', 'failed'}:
+                stage['state'] = 'paused'
+            elif (enabled and not pending and stage['state'] == 'paused'
+                    and self.source_done.is_set() and not asr['failed_chunks']
+                    and not self.inference_unconfirmed):
+                # A final admitted ASR may add only native/filler rows. Empty
+                # eligible coverage needs no translation; analysis still needs
+                # evidence of an actually published result.
+                if kind == 'translation' or (stage.get('result') and stage.get('generated_at') is not None):
+                    stage['state'] = 'completed'
+            if kind == 'translation':
+                stage['completion_confirmed'] = not stage['worker_alive'] and stage['state'] not in {'running', 'paused'}
+        active = bool((self.source_thread and self.source_thread.is_alive() and not self.source_done.is_set())
+            or (self.worker and self.worker.is_alive() and not self.worker_finishing)
+            or (self.cloud_worker and self.cloud_worker.is_alive()) or self.inference_unconfirmed)
+        if self.recorder:
+            observed = self.recorder.snapshot()
+            active = active or not (observed.get('stop_confirmed', False) and observed.get('callbacks_confirmed', False))
+        self.state['processing_stop_status'] = 'stopping' if active else 'stopped'
+
     def _asr_schedule_locked(self):
         """Report observed chunk progress, never an inference completion ETA."""
         interval = self.chunk_seconds
@@ -359,6 +407,8 @@ class LectureApp:
             return status('busy', 'request')
         if asr.get('failed_chunks') or asr.get('error') or asr['state'] == 'failed':
             return status('blocked', 'failed')
+        if self.state.get('processing_stop_requested'):
+            return status('blocked', 'stopped')
         if not self.audio_queue.empty():
             return status('busy', 'queued')
         if self.source_done.is_set() and asr['state'] == 'completed' and not self.inference_unconfirmed:
@@ -425,6 +475,8 @@ class LectureApp:
 
     def _generation_due(self, kind, finished, newest, now, *, manual=None):
         """The scheduler and dashboard share this eligibility calculation."""
+        if self.abort_processing.is_set() or self.closing:
+            return False, None, 'stopped' if self.state.get('processing_stop_requested') else 'closed'
         if manual is None:
             manual = (self.translation_retry_event if kind == 'translation' else self.retry_event).is_set()
         recovery = self._recovery[kind]
@@ -484,6 +536,8 @@ class LectureApp:
             return status('busy', 'request')
         if kind == 'analysis' and self.state[kind]['state'] == 'running':
             return status('busy', 'request')
+        if self.state.get('processing_stop_requested'):
+            return status('blocked', 'stopped')
         if self.closing or self.abort_processing.is_set() or self.inference_unconfirmed:
             return status('blocked', 'closed')
         eligible = content_lines(self.state['lines'])
@@ -542,8 +596,8 @@ class LectureApp:
             translation.update(ready_lines=0, waiting_lines=0)
         if translation['enabled'] and pending and translation['state'] == 'completed':
             translation['state'] = 'waiting'
-        translation['completion_confirmed'] = not translation['worker_alive'] and translation['state'] != 'running'
-        if translation['enabled'] and pending and self.result_dir is not None:
+        translation['completion_confirmed'] = not translation['worker_alive'] and translation['state'] not in {'running', 'paused'}
+        if translation['enabled'] and pending and self.result_dir is not None and not self.abort_processing.is_set():
             from lecture_translation import TranslationInputError
             try:
                 self._translation_readiness_locked(self._translation_input_finished())
@@ -786,15 +840,26 @@ class LectureApp:
 
     def stop(self):
         with self.lock:
+            if self.result_dir is None:
+                return self.snapshot()  # Saved-result views own no processing to stop.
+            self.stop_source.set()
+            self.abort_processing.set()
+            self.retry_event.clear()
+            self.translation_retry_event.clear()
+            if self.state['session']:
+                self.state['processing_stop_requested'] = True
+                self.state['message'] = '新しい処理を停止しました。送信済みの処理の終了と音声の保存を確認しています。'
+            for recovery in self._recovery.values():
+                recovery.update(paused=True, next=None, manual_requested=False, manual_admitted=False)
             if self.state['capture']['state'] in ACTIVE:
                 self.state['capture']['state'] = 'stopping'
-                self.state['message'] = '録音を終了し、保存済みの音声を処理しています。'
-                self.stop_source.set()
         self.persist(force=True)
         return self.snapshot()
 
     def retry_analysis(self):
         with self.lock:
+            if self.abort_processing.is_set() or self.state.get('processing_stop_requested'):
+                raise RuntimeError('停止したセッションの追加処理はできません。新しく開始してください。')
             if self.closing or self.inference_unconfirmed:
                 raise RuntimeError('終了処理中、またはローカル推論の終了が未確認です。')
             if self.worker_finishing and self.worker and self.worker.is_alive():
@@ -815,6 +880,8 @@ class LectureApp:
 
     def retry_translation(self):
         with self.lock:
+            if self.abort_processing.is_set() or self.state.get('processing_stop_requested'):
+                raise RuntimeError('停止したセッションの追加処理はできません。新しく開始してください。')
             if self.closing or self.inference_unconfirmed:
                 raise RuntimeError('終了処理中、または推論の終了が未確認です。')
             if self.worker_finishing and self.worker and self.worker.is_alive():
@@ -848,6 +915,8 @@ class LectureApp:
         if kind not in {'analysis', 'translation'}:
             raise ValueError('再試行を保留する処理を指定してください。')
         with self.lock:
+            if self.abort_processing.is_set():
+                raise RuntimeError('停止したセッションの追加処理はできません。')
             if not self.result_dir or not self._continuous_enabled():
                 raise ValueError('このセッションでは自動再試行を保留できません。')
             recovery = self._recovery[kind]
@@ -882,11 +951,13 @@ class LectureApp:
             self.state['analysis'].update(state='running', error=None)
             return {'lines': lines, 'previous': previous, 'translation_ids': list(translation_ids),
                     'selection': deepcopy(selection), 'through': through, 'provider': provider, 'model': model,
-                    'session': deepcopy(self.state['session']), 'result_dir': self.result_dir}
+                    'session': deepcopy(self.state['session']), 'result_dir': self.result_dir,
+                    'stop_event': self.abort_processing}
 
     def _begin_retry_attempt(self, kind):
         from event_insights_cloud import CloudError
         with self.lock:
+            check_processing_allowed()
             recovery = self._recovery[kind]
             if (recovery['paused'] or recovery['attempts'] >= MAX_AUTO_RETRIES
                     or recovery['started'] is None
@@ -896,29 +967,39 @@ class LectureApp:
             recovery['attempts'] += 1
 
     def _analyze(self, *, manual_retry=False, prepared=None, automatic_retry=False):
-        from lecture_analysis import analyze_snapshot
         job = prepared if prepared is not None else self._prepare_analysis()
         if job is None:
             return
+        with processing_scope(job.get('stop_event', self.abort_processing)):
+            check_processing_allowed()
+            return self._analyze_job(job, manual_retry=manual_retry, automatic_retry=automatic_retry)
+
+    def _analyze_job(self, job, *, manual_retry=False, automatic_retry=False):
+        from lecture_analysis import analyze_snapshot
         lines, previous = job['lines'], job['previous']
         translation_ids, selection, through = job['translation_ids'], job['selection'], job['through']
         provider, model, result_dir = job['provider'], job['model'], job['result_dir']
         self.persist(force=True)
         before = time.monotonic()
         generate = self.analyzer_override or analyze_snapshot
+        check_processing_allowed()
         if provider == 'openai':
             if self.readiness:
                 health = self.readiness.snapshot()
+                check_processing_allowed()
                 network = next((row for row in health['checks'] if row['id'] == 'network'), None)
                 if network and network.get('reachable') is not True:
                     raise LectureOfflineError('インターネット接続待ちです。録音・原文保存は続け、新着原文で自動的に再確認します。')
+            check_processing_allowed()
             if automatic_retry:
                 self._begin_retry_attempt('analysis')
+            check_processing_allowed()
             receipt = self.cloud_scope.reserve(job['session'], model, through)
             append_json(result_dir / 'cloud-scope.jsonl', receipt)
         # Manual or policy-admitted retry retains prior charges and rechecks the
         # same text scope and shared budget before another cloud attempt.
         retry_options = {'retry_failed': True} if provider == 'openai' and manual_retry else {}
+        check_processing_allowed()
         result = generate(lines, previous, provider=provider, model=model, through_seconds=through,
                           translation_ids=translation_ids, timeout=60 if provider == 'openai' else 120,
                           out_dir=result_dir / 'analyses', include_block_translations=selection['include_block_translations'],
@@ -964,15 +1045,18 @@ class LectureApp:
         with self.lock:
             if session_id is not None and (not self.state['session'] or self.state['session']['id'] != session_id):
                 return
-            self.state['analysis'].update(state='failed', error=str(exc)[:1000])
-            from lecture_analysis import SnapshotInputError, SnapshotResponseError
-            from event_insights import InputTooLargeError
-            if (self.state['analysis']['provider'] == 'local'
-                    and not getattr(exc, 'local_inference_finished', False)
-                    and not isinstance(exc, (SnapshotInputError, SnapshotResponseError, InputTooLargeError))):
-                self.inference_unconfirmed = True
-                self.state['asr'].update(state='paused',
-                    error='ローカル解析の終了を確認できないため、追加推論を保留しました。録音は継続しています。')
+            if isinstance(exc, (ProcessingStopped, InferenceCancelled)):
+                self.state['analysis'].update(state='paused', error=None)
+            else:
+                self.state['analysis'].update(state='failed', error=str(exc)[:1000])
+                from lecture_analysis import SnapshotInputError, SnapshotResponseError
+                from event_insights import InputTooLargeError
+                if (self.state['analysis']['provider'] == 'local'
+                        and not getattr(exc, 'local_inference_finished', False)
+                        and not isinstance(exc, (SnapshotInputError, SnapshotResponseError, InputTooLargeError))):
+                    self.inference_unconfirmed = True
+                    self.state['asr'].update(state='paused',
+                        error='ローカル解析の終了を確認できないため、追加推論を保留しました。録音は継続しています。')
         self.persist(force=True)
         try:
             self._cost_report()
@@ -999,22 +1083,32 @@ class LectureApp:
             self.state['translation'].update(state='running', error=None, retry_required=False)
             return {'plan': deepcopy(plan), 'session': deepcopy(self.state['session']),
                     'result_dir': self.result_dir, 'model': self.state['analysis']['model'],
-                    'started_at': time.time()}
+                    'started_at': time.time(), 'stop_event': self.abort_processing}
 
     def _translate(self, job, *, manual_retry=False, automatic_retry=False):
+        with processing_scope(job.get('stop_event', self.abort_processing)):
+            check_processing_allowed()
+            return self._translate_job(job, manual_retry=manual_retry, automatic_retry=automatic_retry)
+
+    def _translate_job(self, job, *, manual_retry=False, automatic_retry=False):
         from lecture_translation import translate_batch, TranslationResponseError
         plan = job['plan']
         self.persist(force=True)
+        check_processing_allowed()
         before = time.monotonic()
         if self.readiness:
             network = next((row for row in self.readiness.snapshot()['checks'] if row['id'] == 'network'), None)
+            check_processing_allowed()
             if network and network.get('reachable') is not True:
                 raise LectureOfflineError('通信の復帰を待っています。未翻訳の原文は保存されています。')
+        check_processing_allowed()
         if automatic_retry:
             self._begin_retry_attempt('translation')
+        check_processing_allowed()
         receipt = self.cloud_scope.reserve(job['session'], job['model'], plan['through_seconds'])
         append_json(job['result_dir'] / 'cloud-scope.jsonl', {**receipt, 'stage': 'translation'})
         generate = self.translator_override or translate_batch
+        check_processing_allowed()
         result = generate(plan, provider='openai', model=job['model'], out_dir=job['result_dir'] / 'translations',
                           timeout=60, retry_failed=manual_retry)
         blocks = result.get('blocks')
@@ -1083,9 +1177,12 @@ class LectureApp:
             if session_id is not None and (not self.state['session'] or self.state['session']['id'] != session_id):
                 return
             pending, _ = self._refresh_translation_locked()
-            offline = isinstance(exc, LectureOfflineError)
-            self.state['translation'].update(state='waiting' if offline else 'failed', error=str(exc)[:1000],
-                retry_required=bool(pending) and not offline)
+            if isinstance(exc, (ProcessingStopped, InferenceCancelled)):
+                self.state['translation'].update(state='paused', error=None, retry_required=False)
+            else:
+                offline = isinstance(exc, LectureOfflineError)
+                self.state['translation'].update(state='waiting' if offline else 'failed', error=str(exc)[:1000],
+                    retry_required=bool(pending) and not offline)
         self.persist(force=True)
         try:
             self._cost_report()
@@ -1094,6 +1191,8 @@ class LectureApp:
 
     def _start_cloud_job(self, kind, job, manual_retry, automatic_retry=False):
         with self.lock:
+            if self.closing or job.get('stop_event', self.abort_processing).is_set():
+                raise ProcessingStopped('新しい処理は停止されています。')
             if self.cloud_worker is not None:
                 raise RuntimeError('翻訳または分析がすでに進行中です。')
             self._cloud_outcome = None
@@ -1182,6 +1281,10 @@ class LectureApp:
         kind, exc = outcome.get('kind', 'analysis'), outcome['error']
         with self.lock:
             recovery = self._recovery[kind]
+            if isinstance(exc, (ProcessingStopped, InferenceCancelled)):
+                recovery.update(next=None, paused=True, manual_requested=False, manual_admitted=False)
+                self.state[kind]['state'] = 'paused'
+                return
             offline = isinstance(exc, LectureOfflineError)
             self._generation_offline[kind] = offline
             if not offline:
@@ -1189,7 +1292,7 @@ class LectureApp:
             if kind == 'analysis':
                 self._analysis_manual_required = bool(exc) and not offline
             if exc is None:
-                recovery.update(next=None, started=None, exhausted=False, paused=False, error=None)
+                recovery.update(next=None, started=None, exhausted=False, paused=self.abort_processing.is_set(), error=None)
                 self._retry_jobs.pop(kind, None)
                 return
             details = (exc.diagnostics() if isinstance(exc, CloudError) else
@@ -1216,7 +1319,7 @@ class LectureApp:
                         self.state[kind]['retry_required'] = False
                     else:
                         self._analysis_manual_required = False
-            if recovery['paused']:
+            if recovery['paused'] and not self.abort_processing.is_set():
                 if kind == 'translation':
                     self.state[kind].update(state='failed', retry_required=True)
                 else:
@@ -1302,15 +1405,17 @@ class LectureApp:
                         self._generation_offline['analysis'] = offline_failure
                 if self.abort_processing.is_set():
                     with self.lock:
-                        self.state['asr'].update(state='paused', error='アプリ終了のため残りの認識を保留しました。音声は保存されています。')
+                        if self.state['asr']['state'] != 'failed':
+                            self.state['asr'].update(state='paused', error=None)
                         pending = self.cloud_worker
                     if pending is not None:
                         pending.join(.2)
                         continue
                     with self.lock:
-                        pending_lines, _ = self._refresh_translation_locked()
-                        if self._continuous_enabled() and pending_lines and self.state['translation']['state'] != 'failed':
-                            self.state['translation'].update(state='paused', error='アプリ終了のため未翻訳の原文を保留しました。')
+                        for kind in ('analysis', 'translation'):
+                            if self.state[kind]['state'] in {'running', 'waiting'}:
+                                self.state[kind]['state'] = 'paused'
+                        self._refresh_stopped_locked()
                     break
                 chunk = None
                 try:
@@ -1322,8 +1427,10 @@ class LectureApp:
                         with self.lock:
                             self.state['asr']['state'] = 'running'
                         began = time.monotonic()
-                        report = self.transcriber(chunk, self.result_dir / 'asr' / f"{chunk['index']:06d}.json",
-                                                  self.state['session']['language'])
+                        with processing_scope(self.abort_processing):
+                            check_processing_allowed()
+                            report = self.transcriber(chunk, self.result_dir / 'asr' / f"{chunk['index']:06d}.json",
+                                                      self.state['session']['language'])
                         lines = build_lines({'segments': [{'index': chunk['index'],
                                                            'start_seconds': chunk['start_seconds']}]},
                                             {chunk['index']: report})
@@ -1340,6 +1447,11 @@ class LectureApp:
                                 'source_chunk_completed_at': chunk.get('completed_at'),
                                 'chunk_ready_to_publication_seconds': (time.time() - chunk['completed_at']
                                     if chunk.get('completed_at') else None), 'browser_render_measured': False})
+                    except (ProcessingStopped, InferenceCancelled):
+                        # It never entered inference; keep the exact audio chunk pending.
+                        self.audio_queue.put(chunk)
+                        with self.lock:
+                            self.state['asr'].update(state='paused', error=None)
                     except Exception as exc:
                         with self.lock:
                             self.state['asr'].update(state='failed', error=str(exc)[:1000])
@@ -1400,7 +1512,9 @@ class LectureApp:
                             self.worker_finishing = True
                             break
             with self.lock:
-                if self.state['asr']['state'] != 'paused':
+                if self.abort_processing.is_set():
+                    self._refresh_stopped_locked()
+                if self.state['asr']['state'] != 'paused' and not self.abort_processing.is_set():
                     self.state['asr']['state'] = 'failed' if self.state['asr']['failed_chunks'] else 'completed'
                 if self.state['analysis']['state'] == 'waiting':
                     self.state['analysis']['state'] = 'idle'
@@ -1408,7 +1522,7 @@ class LectureApp:
                             self.state['asr']['state'] == 'failed' or self.state['analysis']['state'] == 'failed'
                             or self.state['translation']['state'] == 'failed')
                 self.state['message'] = ('追加推論を保留しました。録音と保存状態は別に確認してください。'
-                    if self.state['asr']['state'] == 'paused' else
+                    if self.abort_processing.is_set() or self.state['asr']['state'] == 'paused' else
                     '処理を終了しました。一部に失敗があります。保存された音声と状態を確認してください。'
                     if failures else '録音と処理を終了しました。音声・原文・分析は保存されています。')
         except Exception as exc:
@@ -1427,14 +1541,14 @@ class LectureApp:
             self.persist(force=True)
 
     def close(self, timeout=20):
-        if self.readiness:
-            self.readiness.close()
         with self.lock:
             self.closing = True
             self.stop_source.set()
             self.abort_processing.set()
             if self.state['capture']['state'] in ACTIVE:
                 self.state['capture']['state'] = 'stopping'
+        if self.readiness:
+            self.readiness.close()
         deadline = time.monotonic() + timeout
         for thread in (self.source_thread, self.worker, self.cloud_worker):
             if thread:

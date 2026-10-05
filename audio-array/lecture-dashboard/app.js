@@ -46,10 +46,11 @@
 
   function getControlState(state, connected, now, hasDevice, pending) {
     const active = ACTIVE_CAPTURE.has(state?.capture?.state);
-    const processing = state?.processing_active === true || BUSY_WORK.has(state?.asr?.state) || BUSY_WORK.has(state?.analysis?.state);
+    const processing = state?.processing_active === true || state?.processing_stop_status === 'stopping'
+      || BUSY_WORK.has(state?.asr?.state) || BUSY_WORK.has(state?.analysis?.state) || BUSY_WORK.has(state?.translation?.state);
     return {
       startDisabled: !isFresh(state, connected, now) || !hasDevice || active || processing || !!pending || ['checking', 'blocked'].includes(state?.preflight?.state),
-      stopDisabled: !active || state?.capture?.state === 'stopping' || !!pending,
+      stopDisabled: !(active || (state?.session && !state?.demo && processing)) || state?.processing_stop_requested === true || !!pending,
       settingsDisabled: active || processing || !!pending,
     };
   }
@@ -87,6 +88,9 @@
   function schedulePresentation(schedule, fresh, elapsed = 0, kind = 'analysis') {
     if (!fresh) return {state: 'unknown', label: '状態不明', compact: '状態不明', fraction: 0};
     if (!schedule) return {state: 'unknown', label: '更新予定は未取得', compact: '未取得', fraction: 0};
+    if (schedule.reason === 'stopped') return {state: 'blocked', label: '新しい処理は停止', compact: '停止', fraction: 0};
+    if (schedule.reason === 'stop_requested') return {state: 'blocked', label: '停止の反映を確認中', compact: '停止確認中', fraction: 0};
+    if (schedule.reason === 'finishing') return {state: 'busy', label: '開始済みの処理の終了待ち', compact: '終了待ち', fraction: 0};
     if (schedule.state === 'complete') return {state: 'complete', label: '処理済み', compact: '処理済み', fraction: 0};
     if (schedule.state === 'waiting' && schedule.reason === 'continuation') {
       return {state: 'waiting', label: '文の続き待ち', compact: '続き待ち', fraction: 0};
@@ -168,6 +172,7 @@
     let conceptSeenCount = 0;
     let conceptSession = null;
     const pauseRetryBusy = new Set();
+    const stopRequested = () => state?.processing_stop_requested === true || pending?.kind === 'stop';
     let displayedState = null;
     let renderedSignature = '';
     let lineElements = new Map();
@@ -439,10 +444,11 @@
       const preparing = ['checking', 'blocked'].includes(state?.preflight?.state) ? ' · 準備を確認' : '';
       put('settings-summary', [inputLabel, languageLabel, providerLabel].filter(Boolean).join(' · ') + preparing);
       put('start-button', pending?.kind === 'start' ? (pending.phase === 'sending' ? '開始を要求中…' : '開始結果を確認中…') : '● 録音を開始');
-      put('stop-button', pending?.kind === 'stop' || state?.capture?.state === 'stopping' ? '停止・保存を確認中…' : '録音を停止');
-      $('retry-button').hidden = state?.analysis?.state !== 'failed' || state?.analysis?.provider === 'off'
+      put('stop-button', pending?.kind === 'stop' ? (pending.phase === 'sending' ? '停止を要求中…' : '停止を確認中…')
+        : (state?.processing_stop_requested === true ? (state.processing_stop_status === 'stopped' ? '停止済み' : '停止を確認中…') : '録音・処理を停止'));
+      $('retry-button').hidden = stopRequested() || state?.analysis?.state !== 'failed' || state?.analysis?.provider === 'off'
         || state?.analysis?.schedule?.reason === 'retry';
-      $('retry-button').disabled = retryBusy || !isFresh(state, connected, now());
+      $('retry-button').disabled = stopRequested() || retryBusy || !isFresh(state, connected, now());
       put('retry-button', retryBusy ? '分析の再試行を要求中…' : '分析を再試行');
       $('freeze-button').disabled = !displayedState;
       $('freeze-button').setAttribute('aria-pressed', String(frozen));
@@ -469,6 +475,14 @@
         else if (capture.state === 'completed') sessionMessage = '録音・保存は完了しました。原文と解析の処理状態を確認してください。';
         else if (capture.state === 'failed') sessionMessage = '録音・保存で問題が起きました。録音・保存欄のエラーを確認してください。';
       }
+      if (state?.processing_stop_requested === true) {
+        if (!fresh) sessionMessage = '停止を要求済みですが、現在の録音・処理状態は確認できません。';
+        else if (state.processing_stop_status === 'stopped') sessionMessage = capture.state === 'failed'
+          ? '処理は停止しましたが、録音・保存は失敗した状態です。保存済みの内容と未処理分は残しています。'
+          : '録音と新しい処理の停止を確認しました。未処理分は残しています。';
+        else if (ACTIVE_CAPTURE.has(capture.state)) sessionMessage = '新しい認識・翻訳・分析を停止しました。録音の停止と音声の保存を確認しています。';
+        else sessionMessage = '新しい処理を停止しました。すでに開始した処理の終了を確認しています。';
+      }
       showText('session-message', sessionMessage);
       pill('capture-state', captureView.label, captureView.tone);
       put('capture-label', state?.session?.source_kind === 'replay' ? '保存音声の再生' : '録音・保存');
@@ -487,7 +501,8 @@
       const stageLabels = {idle: '待機', waiting: '待機中', running: '処理中', completed: '完了', failed: '失敗・要確認', paused: '保留', off: 'オフ', disabled: 'オフ'};
       for (const [name, stage] of [['asr', asr], ['analysis', analysis]]) {
         const partial = name === 'asr' && stage.state === 'completed' && array(stage.failed_chunks).length > 0;
-        const label = name === 'analysis' && stage.provider === 'off' ? 'オフ' : (partial ? '一部未認識' : (stageLabels[stage.state] || '不明'));
+        const label = name === 'analysis' && stage.provider === 'off' ? 'オフ' : (partial ? '一部未認識'
+          : (state?.processing_stop_requested === true && stage.state === 'paused' ? '停止・未処理あり' : (stageLabels[stage.state] || '不明')));
         pill(`${name}-state`, fresh ? label : '不明', !fresh || partial || stage.state === 'paused' ? 'warning' : (stage.state === 'failed' ? 'error' : (stage.state === 'running' ? 'good' : 'muted')));
         put(`${name}-time`, formatTime(stage.through_seconds));
         showText(`${name}-error`, text(stage.error));
@@ -497,7 +512,7 @@
         const note = continues ? 'API解析が利用できなくても、録音・保存は継続しています。' : 'API解析と録音・保存は独立しています。録音・保存欄で現在の状態を確認してください。';
         showText('analysis-error', [text(analysis.error), note].filter(Boolean).join('\n'));
       }
-      put('asr-detail', (asr.state === 'paused' ? '認識を保留 · ' : '') + (number(asr.queue_seconds) ? `認識待ち ${formatTime(asr.queue_seconds)}${!fresh ? '（前回観測）' : ''}` : '認識した音声の位置'));
+      put('asr-detail', (asr.state === 'paused' ? (state?.processing_stop_requested === true ? '未認識分を残して停止 · ' : '認識を保留 · ') : '') + (number(asr.queue_seconds) ? `${state?.processing_stop_requested === true ? '未認識' : '認識待ち'} ${formatTime(asr.queue_seconds)}${!fresh ? '（前回観測）' : ''}` : '認識した音声の位置'));
       const failures = array(asr.failed_chunks);
       $('asr-failures').hidden = !failures.length;
       put('asr-failures-summary', `未認識の区間 ${failures.length}件`);
@@ -512,9 +527,12 @@
       if (analysis.generated_at) analysisDetails.push(`生成 ${ageText(analysis.generated_at, current)}`);
       put('analysis-detail', analysis.provider === 'off' ? '原文のみ。理解支援はオフです。' : (analysisDetails.join(' · ') || '分析した音声の位置'));
       const session = state?.session;
-      const waitingForWorker = state?.processing_active === true && !ACTIVE_CAPTURE.has(capture.state);
+      const waitingForWorker = (state?.processing_active === true || state?.processing_stop_status === 'stopping') && !ACTIVE_CAPTURE.has(capture.state);
       const preflightWait = ['checking', 'blocked'].includes(state?.preflight?.state) && !ACTIVE_CAPTURE.has(capture.state);
-      put('setup-hint', waitingForWorker ? '前のセッションの処理終了を確認するまで、新しい録音は開始できません。録音・認識・分析の状態を確認してください。' : (preflightWait ? '下の準備確認が終わると録音を開始できます。問題がある項目を確認してください。' : (session?.source_kind === 'replay' ? '保存済み音声の逐次再生です。Macのマイクは使用していません。' : 'Macのマイクから音声を保存します。録音はボタンを押してから始まります。')));
+      const cloudInFlight = analysis.provider === 'openai' && ['analysis', 'translation'].some(kind => state[kind]?.state === 'running' || state[kind]?.worker_alive === true);
+      put('setup-hint', stopRequested() && cloudInFlight
+        ? '開始済みのAPI処理の終了を待っています。送信済みの要求は取り消せず、料金が発生することがあります。'
+        : (waitingForWorker ? '前のセッションの処理終了を確認するまで、新しい録音は開始できません。録音・認識・分析の状態を確認してください。' : (preflightWait ? '下の準備確認が終わると録音を開始できます。問題がある項目を確認してください。' : (session?.source_kind === 'replay' ? '保存済み音声の逐次再生です。Macのマイクは使用していません。' : 'Macのマイクから音声を保存します。録音はボタンを押してから始まります。'))));
       renderPreflight(fresh, current);
       renderAgenda();
       renderControls();
@@ -548,19 +566,20 @@
           if (kind === 'translation' && stage.enabled !== true) continue;
           const off = kind === 'analysis' && stage.provider === 'off';
           const known = stageLabels[kind][stage.state];
-          const unresolved = stage.completion_confirmed === false && !BUSY_WORK.has(stage.state) && !ACTIVE_CAPTURE.has(stage.state);
+          const intentionallyPaused = state.processing_stop_requested === true && stage.state === 'paused';
+          const unresolved = stage.completion_confirmed === false && !intentionallyPaused && !BUSY_WORK.has(stage.state) && !ACTIVE_CAPTURE.has(stage.state);
           const name = {capture: '保存', asr: '文字起こし', translation: '翻訳', analysis: '整理'}[kind];
-          const label = off ? '整理オフ' : (unresolved ? `${name}未確認`
-            : (stage.schedule?.retry?.paused && stage.state !== 'failed' ? `${name}保留` : known));
+          const label = off ? '整理オフ' : (intentionallyPaused ? `${name}未処理` : (unresolved ? `${name}未確認`
+            : (stage.schedule?.retry?.paused && stage.state !== 'failed' ? `${name}保留` : known)));
           labels.push(kind === 'asr' && array(stage.failed_chunks).length ? '未認識あり' : (label || '状態不明'));
           if (off) continue;
-          if (!known || ['failed', 'stalled', 'paused', 'unknown'].includes(stage.state)) {
+          if (!known || (!intentionallyPaused && ['failed', 'stalled', 'paused', 'unknown'].includes(stage.state))) {
             alerts.add(`${kind}:${stage.state || 'unknown'}:${text(stage.error)}`);
             if (stage.state === 'failed') tone = 'error';
           }
           if (unresolved) alerts.add(`${kind}:unresolved`);
-          if (stage.schedule?.retry?.paused) alerts.add(`${kind}:retry-paused`);
-          if (stage.schedule?.retry?.exhausted || stage.schedule?.reason === 'manual_retry') alerts.add(`${kind}:retry-required`);
+          if (!stopRequested() && stage.schedule?.retry?.paused) alerts.add(`${kind}:retry-paused`);
+          if (!stopRequested() && (stage.schedule?.retry?.exhausted || stage.schedule?.reason === 'manual_retry')) alerts.add(`${kind}:retry-required`);
         }
         if (capture.state === 'recording' && captureView.tone === 'warning') alerts.add('capture:input-stalled');
         for (const failure of array(state.asr?.failed_chunks)) alerts.add(`asr:chunk:${failure.index}:${failure.start_seconds}:${failure.end_seconds}`);
@@ -587,12 +606,17 @@
           || ['failed', 'paused'].includes(stage.state) || stage.completion_confirmed === false)) {
           schedule = {...schedule, state: 'blocked', reason: 'error'};
         }
+        if (stopRequested()) schedule = {state: 'blocked', reason: state?.processing_stop_requested !== true ? 'stop_requested'
+          : (stage?.state === 'running' || stage?.worker_alive === true ? 'finishing' : 'stopped')};
         const box = $(`${kind}-schedule`);
         box.hidden = !state?.session || (kind === 'translation' && state?.translation?.enabled !== true);
         const view = schedulePresentation(schedule, fresh, lastReceivedAt === null ? 0 : now() - lastReceivedAt, kind);
         box.dataset.state = view.state;
         const label = `${frozen ? '現在の処理: ' : ''}${view.label}`;
-        const explanation = kind === 'asr'
+        const explanation = stopRequested()
+          ? (state?.processing_stop_requested !== true ? '停止要求の結果を確認しています。'
+            : (view.state === 'busy' ? '新しい処理は始めません。すでに開始した処理の終了時刻は未定です。' : '未処理分を残したまま、新しい処理と再試行を止めています。'))
+          : kind === 'asr'
           ? `円は次の音声区間${number(schedule?.interval_seconds) && schedule.interval_seconds > 0 ? `（${schedule.interval_seconds}秒ごと）` : ''}を受け付けるまでの目安です。受信済みの音声時間をもとに更新し、文字起こしの完了時刻を予測するものではありません。`
           : (view.state === 'waiting' && schedule?.reason === 'continuation'
             ? '文の区切りを待っています。開始時刻は未定です。'
@@ -607,14 +631,14 @@
         box.title = explanation;
         if (kind !== 'asr') {
           const button = $(`${kind}-pause-retries`);
-          button.hidden = !(schedule?.reason === 'retry' && schedule?.state === 'waiting');
-          button.disabled = !fresh || pauseRetryBusy.has(kind);
+          button.hidden = stopRequested() || !(schedule?.reason === 'retry' && schedule?.state === 'waiting');
+          button.disabled = stopRequested() || !fresh || pauseRetryBusy.has(kind);
         }
       }
     }
 
     async function pauseRetries(kind) {
-      if (pauseRetryBusy.has(kind) || !isFresh(state, connected, now())) return;
+      if (stopRequested() || pauseRetryBusy.has(kind) || !isFresh(state, connected, now())) return;
       pauseRetryBusy.add(kind); renderStatus();
       try {
         await fetchJSON('/api/pause-retries', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({stage: kind})});
@@ -626,9 +650,9 @@
     function renderTranslationStatus(fresh) {
       const translation = state?.translation;
       const enabled = translation?.enabled === true;
-      $('translation-retry-button').hidden = !enabled || translation.state !== 'failed' || translation.retry_required !== true
+      $('translation-retry-button').hidden = stopRequested() || !enabled || translation.state !== 'failed' || translation.retry_required !== true
         || translation.schedule?.reason === 'retry';
-      $('translation-retry-button').disabled = translationRetryBusy || !fresh;
+      $('translation-retry-button').disabled = stopRequested() || translationRetryBusy || !fresh;
       put('translation-retry-button', translationRetryBusy ? '翻訳の再試行を要求中…' : '翻訳を再試行');
       showText('translation-error', enabled ? text(translation.error) : '');
     }
@@ -1028,10 +1052,13 @@
             const status = state.capture.state;
             pending = null;
             if (action === 'start') message(ACTIVE_CAPTURE.has(status) ? '録音の開始を確認しました。' : (actionError || '開始要求後の状態を取得しました。録音の状態欄を確認してください。'), ACTIVE_CAPTURE.has(status) ? 'good' : 'warning');
-            else if (!ACTIVE_CAPTURE.has(status)) message('録音の終了を確認しました。残りの認識・分析は続きます。');
-            else if (status === 'stopping') message('停止を要求しました。保存完了まで状態を確認します。');
+            else if (state.processing_stop_requested === true) message(state.processing_stop_status === 'stopped'
+              ? (status === 'failed' ? '処理は停止しました。録音・保存の失敗と未処理分は残っています。' : '録音と新しい処理の停止を確認しました。未処理分は残しています。')
+              : '新しい処理を停止しました。音声の保存と開始済みの処理の終了を確認しています。', status === 'failed' ? 'warning' : undefined);
+            else if (!ACTIVE_CAPTURE.has(status)) message(actionError || '録音は終了しています。処理の停止を確認できていません。', 'warning');
+            else if (status === 'stopping') message('停止を要求しました。音声の保存と処理の状態を確認しています。');
             else message(actionError || '録音はまだ進行中です。停止の完了を確認できていません。', 'warning');
-            renderControls();
+            renderStatus();
           }
         } catch (error) {
           connected = false;
@@ -1077,8 +1104,8 @@
       if (kind === 'start' && $('provider-select').value === 'openai' && state?.capabilities?.cloud_enabled !== true) { message('この起動ではクラウド解析は有効になっていません。', 'warning'); return; }
       if (kind === 'start') { saveIdlePreferences(); goLive(); }
       pending = {kind, phase: 'sending', minPoll: Infinity};
-      message(kind === 'start' ? '録音の開始を要求しています…' : '停止と音声の保存を要求しています…');
-      renderControls();
+      message(kind === 'start' ? '録音の開始を要求しています…' : '録音と新しい処理の停止を要求しています…');
+      renderStatus();
       const body = kind === 'start' ? {device: $('device-select').value, language: $('language-select').value, provider: $('provider-select').value} : {};
       if (kind === 'start' && $('model-input').value.trim() && body.provider !== 'off') body.model = $('model-input').value.trim();
       try {
@@ -1097,7 +1124,7 @@
     }
 
     async function retryAnalysis() {
-      if (retryBusy || !isFresh(state, connected, now()) || state?.analysis?.state !== 'failed' || state?.analysis?.provider === 'off') return;
+      if (stopRequested() || retryBusy || !isFresh(state, connected, now()) || state?.analysis?.state !== 'failed' || state?.analysis?.provider === 'off') return;
       retryBusy = true;
       renderControls();
       try {
@@ -1108,7 +1135,7 @@
     }
 
     async function retryTranslation() {
-      if (translationRetryBusy || !isFresh(state, connected, now()) || state?.translation?.enabled !== true || state.translation.state !== 'failed' || state.translation.retry_required !== true) return;
+      if (stopRequested() || translationRetryBusy || !isFresh(state, connected, now()) || state?.translation?.enabled !== true || state.translation.state !== 'failed' || state.translation.retry_required !== true) return;
       translationRetryBusy = true;
       renderTranslationStatus(true);
       try {

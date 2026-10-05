@@ -4,12 +4,14 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import threading
 import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import event_insights as insights
+from processing_control import ProcessingStopped, processing_scope
 
 
 def line(identity="l1", start=0, text="Let's test the recorder.", language="en", **extra):
@@ -715,6 +717,60 @@ class TranslateGemmaAdapterTest(unittest.TestCase):
 
 
 class LocalInferenceHookTest(unittest.TestCase):
+    def test_stop_after_lock_wait_prevents_inference_and_releases_slot(self):
+        stop = threading.Event()
+        released = []
+
+        @contextmanager
+        def slot(*args, **kwargs):
+            self.assertIs(stop, kwargs['cancel'])
+            stop.set()
+            try:
+                yield
+            finally:
+                released.append(True)
+
+        with processing_scope(stop), patch.object(insights, 'inference_slot', slot), \
+                patch.object(insights, '_request_json') as request:
+            with self.assertRaises(ProcessingStopped):
+                insights._local_chat({}, timeout=1)
+        request.assert_not_called()
+        self.assertEqual([True], released)
+
+    def test_cancelled_lock_wait_is_paused_instead_of_model_failure(self):
+        stop = threading.Event()
+
+        def cancel_slot(*args, **kwargs):
+            stop.set()
+            raise insights.InferenceCancelled('synthetic')
+
+        with processing_scope(stop), patch.object(insights, 'inference_slot', cancel_slot), \
+                patch.object(insights, '_request_json') as request:
+            with self.assertRaises(ProcessingStopped) as caught:
+                insights._local_chat({}, timeout=1)
+        request.assert_not_called()
+        self.assertTrue(caught.exception.local_inference_finished)
+
+    def test_local_transport_checks_stop_after_preparation(self):
+        stop = threading.Event()
+        with processing_scope(stop), patch.object(insights.request, 'build_opener') as factory:
+            opener = factory.return_value
+            factory.side_effect = lambda *args: (stop.set(), opener)[1]
+            with self.assertRaises(ProcessingStopped):
+                insights._request_json('/api/chat', {})
+        opener.open.assert_not_called()
+
+    def test_admitted_local_request_can_finish_after_stop(self):
+        stop = threading.Event()
+
+        def chat(*args, **kwargs):
+            stop.set()
+            return {'message': 'synthetic'}
+
+        with processing_scope(stop), patch.object(insights, 'inference_slot', return_value=nullcontext()), \
+                patch.object(insights, '_request_json', chat):
+            self.assertEqual({'message': 'synthetic'}, insights._local_chat({}, timeout=1))
+
     def test_each_local_chat_path_acquires_once_around_actual_inference(self):
         events = []
         @contextmanager

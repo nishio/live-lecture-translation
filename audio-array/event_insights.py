@@ -14,6 +14,7 @@ import socket
 from urllib import error, request
 
 from local_inference import InferenceCancelled, InferenceTimeout, inference_slot
+from processing_control import check_processing_allowed, current_cancel_event
 
 
 OLLAMA_URL = "http://127.0.0.1:11434"
@@ -75,6 +76,7 @@ def _request_json(path, payload=None, *, timeout=5):
                           headers={"Content-Type": "application/json"})
     opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
     try:
+        check_processing_allowed()
         with opener.open(req, timeout=timeout) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except error.HTTPError as exc:
@@ -105,10 +107,15 @@ def _is_remote(value):
 
 def _local_chat(payload, *, timeout):
     """Hold one cooperative slot only during the local inference HTTP call."""
+    check_processing_allowed()
     try:
-        with inference_slot("ollama", timeout=timeout):
+        with inference_slot("ollama", timeout=timeout, cancel=current_cancel_event()):
+            check_processing_allowed()
             return _request_json("/api/chat", payload, timeout=timeout)
     except (InferenceTimeout, InferenceCancelled) as exc:
+        # Session cancellation is a paused operation, not a model failure or an
+        # inference with unknown completion. Preserve unrelated slot failures.
+        check_processing_allowed()
         raise InsightsError("ローカル推論枠の待機が終了しました。再実行前に処理状態を確認してください。") from exc
     except OSError as exc:
         raise InsightsError("ローカル推論の排他状態を確認できません。推論は継続しません。") from exc
