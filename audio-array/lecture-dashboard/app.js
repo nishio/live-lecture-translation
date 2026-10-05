@@ -80,9 +80,14 @@
     return groups;
   }
 
+  function provisionalSignature(preview) {
+    return [preview?.enabled, preview?.state, preview?.error, preview?.revision, preview?.window_start_seconds,
+      preview?.through_seconds, preview?.published_at, preview?.lines];
+  }
+
   function contentSignature(state) {
     return JSON.stringify([state?.session?.id, state?.analysis?.generated_at, state?.analysis?.through_seconds, state?.analysis?.result, state?.lines,
-      state?.translation?.enabled, state?.translation?.blocks, state?.analysis_history, state?.provisional_asr, state?.asr?.through_seconds]);
+      state?.translation?.enabled, state?.translation?.blocks, state?.analysis_history, provisionalSignature(state?.provisional_asr), state?.asr?.through_seconds]);
   }
 
   function schedulePresentation(schedule, fresh, elapsed = 0, kind = 'analysis') {
@@ -178,6 +183,13 @@
     let lineElements = new Map();
     let renderedTranscriptSignature = '';
     let renderedProvisionalSignature = '';
+    // These nodes move into the one transcript scroller when needed. Keep
+    // references while detached; they are never a second reading pane.
+    const previewNodes = new Map(['provisional-region', 'provisional-heading', 'provisional-help', 'provisional-error',
+      'provisional-lines', 'provisional-history', 'provisional-history-summary', 'provisional-history-lines'].map(id => [id, $(id)]));
+    const previewNode = id => previewNodes.get(id);
+    previewNode('provisional-region').replaceChildren(...['provisional-heading', 'provisional-help', 'provisional-error', 'provisional-lines'].map(previewNode));
+    previewNode('provisional-history').replaceChildren(previewNode('provisional-history-summary'), previewNode('provisional-history-lines'));
     let renderedTranslationSignature = '';
     let translationElements = new Map();
     let translationSession = null;
@@ -601,7 +613,7 @@
 
     function renderSchedules(fresh) {
       for (const kind of ['asr', 'translation', 'analysis']) {
-        const stage = state?.[kind];
+        const stage = kind === 'asr' && state?.provisional_asr?.enabled === true ? state.provisional_asr : state?.[kind];
         let schedule = stage?.schedule;
         if (kind === 'asr' && schedule?.state === 'complete' && (array(stage.failed_chunks).length || stage.error || schedule.error
           || ['failed', 'paused'].includes(stage.state) || stage.completion_confirmed === false)) {
@@ -618,7 +630,7 @@
           ? (state?.processing_stop_requested !== true ? '停止要求の結果を確認しています。'
             : (view.state === 'busy' ? '新しい処理は始めません。すでに開始した処理の終了時刻は未定です。' : '未処理分を残したまま、新しい処理と再試行を止めています。'))
           : kind === 'asr'
-          ? `円は${state?.provisional_asr?.enabled ? '蓄積する原文の' : ''}次の音声区間${number(schedule?.interval_seconds) && schedule.interval_seconds > 0 ? `（${schedule.interval_seconds}秒ごと）` : ''}を受け付けるまでの目安です。受信済みの音声時間をもとに更新し、文字起こしの完了時刻を予測するものではありません。${state?.provisional_asr?.enabled ? `速報は${state.provisional_asr.refresh_seconds}秒ごとの音声で更新を試みます。` : ''}`
+          ? `円は原文を更新する次の音声区間${number(schedule?.interval_seconds) && schedule.interval_seconds > 0 ? `（${schedule.interval_seconds}秒ごと）` : ''}を受け付けるまでの目安です。受信済みの音声時間をもとに更新し、文字起こしの完了時刻を予測するものではありません。`
           : (view.state === 'waiting' && schedule?.reason === 'continuation'
             ? '文の区切りを待っています。開始時刻は未定です。'
             : '円は次の処理を開始できるまでの目安です。生成完了までの時間ではありません。');
@@ -787,7 +799,7 @@
       if (focused && rows.some(row => row.contains(focused)) && doc.activeElement !== focused) focused.focus({preventScroll: true});
     }
 
-    function renderProvisional(next) {
+    function provisionalView(next) {
       const preview = next.provisional_asr;
       // A selected analysis does not carry the temporary recognition view that
       // existed then. Never borrow a later revision for that historical view.
@@ -796,17 +808,22 @@
         && next.asr.through_seconds >= preview.through_seconds;
       const lines = available && !caughtUp ? array(preview.lines) : [];
       const error = available ? text(preview.error) || (preview.state === 'failed' ? '速報の更新に失敗しました。' : '') : '';
-      $('provisional-region').hidden = !lines.length && !error;
-      $('provisional-heading').title = preview?.state === 'paused' ? '速報の更新は停止しています。' : '音声が増えると更新します。下の原文と一部重なることがあります。';
-      put('provisional-help', $('provisional-heading').title);
-      showText('provisional-error', error ? `速報の更新に失敗しました。${lines.length ? '最後に届いた速報を残しています。' : ''}` : '');
-      $('provisional-error').title = error;
+      return {preview, lines, error};
+    }
+
+    function renderProvisional(next, {preview, lines, error}) {
+      previewNode('provisional-region').hidden = !lines.length && !error;
+      const paused = preview?.state !== 'running' && (preview?.state === 'paused' || !!error);
+      previewNode('provisional-heading').textContent = paused ? '更新停止' : '更新中';
+      previewNode('provisional-heading').title = paused ? '原文の更新は停止しています。最後に届いた認識を残しています。' : '音声が増えると、この部分の認識が更新されます。';
+      previewNode('provisional-help').textContent = previewNode('provisional-heading').title;
+      previewNode('provisional-error').textContent = error ? `${preview?.state === 'running' ? '前の' : ''}原文の更新に失敗しました。` : '';
+      previewNode('provisional-error').hidden = !error;
+      previewNode('provisional-error').title = error;
       const signature = JSON.stringify([next.session?.id, preview?.revision, lines]);
       if (signature === renderedProvisionalSignature) return;
       renderedProvisionalSignature = signature;
-      const panel = $('provisional-lines');
-      const previousTop = panel.scrollTop;
-      const nearBottom = panel.scrollHeight - panel.clientHeight - previousTop < 30;
+      const panel = previewNode('provisional-lines');
       panel.replaceChildren(...lines.map(line => {
         const row = element('p', 'line-original', text(line.text));
         row.dataset.provisionalId = text(line.id);
@@ -814,11 +831,20 @@
         row.title = `${formatTime(line.start_seconds)}–${formatTime(line.end_seconds)}${line.uncertain ? ' · 認識が不確か' : ''}`;
         return row;
       }));
-      panel.scrollTop = nearBottom ? panel.scrollHeight : previousTop;
+    }
+
+    function reconcileRows(parent, rows) {
+      // Move existing rows without replacing the canonical row being read.
+      for (let index = 0; index < rows.length; index++) {
+        if (parent.children[index] !== rows[index]) parent.insertBefore(rows[index], parent.children[index] || null);
+      }
+      while (parent.children.length > rows.length) parent.removeChild(parent.children[parent.children.length - 1]);
     }
 
     function renderTranscript(next, lines, forceLatest, previousSession) {
-      const signature = JSON.stringify([next.session?.id, lines.map(line => [line.id, line.text, line.start_seconds, line.end_seconds, line.language, line.uncertain])]);
+      const provisional = provisionalView(next);
+      const signature = JSON.stringify([next.session?.id, lines.map(line => [line.id, line.text, line.start_seconds, line.end_seconds, line.language, line.uncertain]),
+        provisionalSignature(provisional.preview), provisional.lines, !!historySelection]);
       if (signature === renderedTranscriptSignature) return;
       renderedTranscriptSignature = signature;
       const transcript = $('transcript');
@@ -828,6 +854,9 @@
       const focusedId = oldIds.find(id => lineElements.get(id) === doc.activeElement);
       const nextElements = new Map();
       const rows = [];
+      const overlappingRows = [];
+      const windowStart = provisional.preview?.window_start_seconds;
+      const hasTail = provisional.lines.length > 0 && number(windowStart);
       const latestId = text(lines[lines.length - 1]?.id);
       const groups = transcriptDisplayGroups(lines);
       for (const group of groups) {
@@ -838,25 +867,34 @@
         const rawSignature = JSON.stringify(group.lines.map(source => [source.id, source.text, source.start_seconds, source.end_seconds, source.language, source.uncertain]));
         row.tabIndex = -1; row.dataset.sourceId = id;
         row.dataset.sourceIds = JSON.stringify(sourceIds);
-        row.classList.toggle('latest-source', sourceIds.includes(latestId));
-        row.setAttribute('aria-current', sourceIds.includes(latestId) ? 'true' : 'false');
+        row.classList.toggle('latest-source', !hasTail && sourceIds.includes(latestId));
+        row.setAttribute('aria-current', !hasTail && sourceIds.includes(latestId) ? 'true' : 'false');
         if (row.dataset.rawSignature !== rawSignature) {
           row.dataset.rawSignature = rawSignature;
           row.title = `${formatTime(line.start_seconds)}–${formatTime(group.lines[group.lines.length - 1].end_seconds)} · ${id}${text(line.language) ? ` · ${text(line.language).toUpperCase()}` : ''}${line.uncertain ? ' · 認識が不確か' : ''}`;
           row.classList.toggle('uncertain-source', !!line.uncertain);
           row.replaceChildren(element('p', 'line-original', text(line.text)));
         }
-        nextElements.set(id, row); rows.push(row);
+        nextElements.set(id, row);
+        // Keep a boundary-crossing row whole and available. Segment times do
+        // not provide word alignment, so never trim words or silently drop it.
+        if (hasTail && !group.lines.every(source => number(source.end_seconds) && source.end_seconds <= windowStart)) overlappingRows.push(row);
+        else rows.push(row);
       }
-      const newIds = [...nextElements.keys()];
-      const appendOnly = oldIds.length > 0 && oldIds.length <= rows.length && oldIds.every((id, index) => id === newIds[index]);
-      if (appendOnly) for (const row of rows.slice(oldIds.length)) transcript.appendChild(row);
-      else transcript.replaceChildren(...rows);
+      const overlap = previewNode('provisional-history');
+      if (previousSession !== next.session?.id) overlap.open = false;
+      overlap.hidden = !overlappingRows.length;
+      reconcileRows(previewNode('provisional-history-lines'), overlappingRows);
+      if (overlappingRows.length) rows.push(overlap);
+      renderProvisional(next, provisional);
+      if (!previewNode('provisional-region').hidden) rows.push(previewNode('provisional-region'));
+      if (!rows.length) rows.push(element('p', 'transcript-empty', 'まだ原文はありません'));
+      reconcileRows(transcript, rows);
       lineElements = nextElements;
-      if (!lines.length) transcript.appendChild(element('p', 'transcript-empty', 'まだ原文はありません'));
-      transcript.scrollTop = forceLatest || previousSession !== next.session?.id || nearBottom ? transcript.scrollHeight : scrollTop;
       const focusedGroup = focusedId && groups.find(group => group.lines.some(line => text(line.id) === focusedId));
       const focusedRow = focusedGroup && lineElements.get(text(focusedGroup.lines[0].id));
+      if (focusedRow && overlap.contains(focusedRow)) overlap.open = true;
+      transcript.scrollTop = forceLatest || previousSession !== next.session?.id || nearBottom ? transcript.scrollHeight : scrollTop;
       if (focusedRow && doc.activeElement !== focusedRow) focusedRow.focus({preventScroll: true});
     }
 
@@ -1054,7 +1092,6 @@
       const mode = next.session?.source_kind === 'replay' ? '保存音声の逐次再生' : 'Mac マイク · 1ch';
       put('session-detail', next.session ? `${mode} · ${text(next.session.id)}` : '開始すると、原文と解説がここに届きます。');
       renderTranscript(next, lines, forceLatest, previousSession);
-      renderProvisional(next);
     }
 
     function acceptState(next) {

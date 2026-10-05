@@ -6,23 +6,24 @@ const path = require('node:path');
 
 class Element {
   constructor(tag = 'div') {
-    this.tagName = tag.toUpperCase(); this.children = []; this._text = ''; this.value = '';
+    this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this._text = ''; this.value = '';
     this.hidden = false; this.disabled = false; this.dataset = {}; this.style = {setProperty(name, value) {this[name] = value;}}; this.attributes = {};
     this.handlers = {}; this.scrollTop = 0; this.scrollHeight = 300; this.clientHeight = 240;
     this.rect = {top: 100, height: 400}; this.capturedPointers = new Set();
     this.classes = new Set(); this.classList = {toggle: (name, value) => value ? this.classes.add(name) : this.classes.delete(name)};
   }
-  set textContent(value) { this._text = String(value); this.children = []; }
+  set textContent(value) { for (const child of this.children) child.parentNode = null; this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
   set innerHTML(_) { throw new Error('Untrusted content must not be rendered as HTML'); }
-  appendChild(child) { this.children.push(child); return child; }
+  appendChild(child) { child.parentNode?.removeChild(child); this.children.push(child); child.parentNode = this; return child; }
   insertBefore(child, before) {
-    const previous = this.children.indexOf(child); if (previous >= 0) this.children.splice(previous, 1);
+    if (child === before) return child;
+    child.parentNode?.removeChild(child);
     const index = before ? this.children.indexOf(before) : this.children.length;
-    this.children.splice(index, 0, child); return child;
+    this.children.splice(index, 0, child); child.parentNode = this; return child;
   }
-  removeChild(child) { this.children.splice(this.children.indexOf(child), 1); return child; }
-  replaceChildren(...children) { this._text = ''; this.children = children; }
+  removeChild(child) { this.children.splice(this.children.indexOf(child), 1); child.parentNode = null; return child; }
+  replaceChildren(...children) { this.textContent = ''; for (const child of children) this.appendChild(child); }
   contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(name, handler) { this.handlers[name] = handler; }

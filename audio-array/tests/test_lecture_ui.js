@@ -58,6 +58,7 @@ async function run() {
   const previewState = snapshot({session: {id: 'preview', source_kind: 'replay'}, demo: {cursor_seconds: 7},
     asr: {state: 'waiting', through_seconds: 0, schedule: {state: 'waiting', interval_seconds: 15, remaining_seconds: 8}},
     provisional_asr: {enabled: true, state: 'completed', refresh_seconds: 3, window_seconds: 15,
+      schedule: {state: 'waiting', reason: 'recording', clock: 'audio', interval_seconds: 3, remaining_seconds: 2},
       revision: 2, window_start_seconds: 0, through_seconds: 6, published_at: 997,
       lines: [previewLine(2, '<script>temporary synthetic words</script>', true)], error: null}});
   const previewEvidence = JSON.stringify(previewState);
@@ -65,9 +66,11 @@ async function run() {
   assert.equal(preview.$('provisional-region').hidden, false);
   assert.equal(preview.$('provisional-lines').textContent, '<script>temporary synthetic words</script>');
   assert.equal(preview.$('provisional-lines').children[0].classes.has('uncertain-source'), true);
-  assert.doesNotMatch(preview.$('transcript').textContent, /temporary synthetic/, 'Temporary words never become canonical source rows');
-  assert.match(preview.$('asr-schedule-summary').title, /蓄積する原文/);
-  assert.match(preview.$('asr-schedule-summary').title, /速報は3秒ごと/);
+  assert.equal(preview.$('transcript').children.at(-1), preview.$('provisional-region'), 'The latest recognition is inside the main original reading flow');
+  assert.equal(preview.$('provisional-lines').children[0].dataset.sourceId, undefined, 'Temporary words never acquire canonical source IDs');
+  assert.equal(preview.$('asr-schedule-compact').textContent, '2秒', 'The original circle uses the actual preview schedule rather than the 15-second canonical clock');
+  assert.match(preview.$('asr-schedule-summary').title, /3秒ごと/);
+  assert.doesNotMatch(preview.$('asr-schedule-summary').title, /15秒/);
   assert.equal(JSON.stringify(previewState), previewEvidence, 'Rendering never changes source or preview evidence');
   preview.app.freeze();
   const revisedPreview = structuredClone(previewState);
@@ -83,14 +86,20 @@ async function run() {
   failedPreview.provisional_asr.state = 'failed'; failedPreview.provisional_asr.error = 'synthetic failure';
   preview.app.acceptState(failedPreview);
   assert.equal(preview.$('provisional-lines').textContent, 'corrected synthetic words');
-  assert.match(preview.$('provisional-error').textContent, /最後に届いた速報/);
+  assert.match(preview.$('provisional-error').textContent, /原文の更新に失敗/);
   assert.equal(preview.$('provisional-error').title, 'synthetic failure');
+  const runningAfterFailure = structuredClone(failedPreview); runningAfterFailure.provisional_asr.state = 'running';
+  runningAfterFailure.provisional_asr.schedule = {state: 'busy', reason: 'request', clock: 'audio', interval_seconds: 3};
+  preview.app.acceptState(runningAfterFailure);
+  assert.equal(preview.$('provisional-heading').textContent, '更新中', 'A retained earlier failure must not label an admitted new recognition as stopped');
+  assert.match(preview.$('provisional-error').textContent, /前の原文/);
+  assert.equal(preview.$('provisional-lines').textContent, 'corrected synthetic words');
   const caughtUp = structuredClone(failedPreview); caughtUp.asr.through_seconds = 9;
   caughtUp.lines = [{id: 'canonical', text: 'separate canonical evidence', start_seconds: 0, end_seconds: 9}];
   preview.app.acceptState(caughtUp);
   assert.equal(preview.$('provisional-lines').textContent, '');
   assert.equal(preview.$('provisional-region').hidden, false, 'Canonical progress must not erase a preview failure');
-  assert.equal(preview.$('transcript').textContent, 'separate canonical evidence');
+  assert.equal(preview.$('transcript').children[0].textContent, 'separate canonical evidence');
   const recoveredPreview = structuredClone(caughtUp);
   recoveredPreview.provisional_asr.state = 'completed'; recoveredPreview.provisional_asr.error = null;
   preview.app.acceptState(recoveredPreview);
@@ -107,6 +116,72 @@ async function run() {
   preview.app.acceptState(snapshot({session: {id: 'next-session'}}));
   assert.equal(preview.$('provisional-region').hidden, true);
   assert.equal(preview.$('provisional-lines').textContent, '', 'New sessions and old-format state clear prior temporary words');
+
+  const flow = appFixture();
+  const canonicalRows = [{id: 'before', text: 'Entire earlier sentence.', start_seconds: 0, end_seconds: 3},
+    {id: 'crossing', text: 'Keep the entire clause that crosses the window edge.', start_seconds: 3, end_seconds: 7},
+    {id: 'overlap', text: 'Saved later recognition.', start_seconds: 7, end_seconds: 10}];
+  const canonicalState = snapshot({session: {id: 'main-original-flow'}, lines: canonicalRows,
+    asr: {state: 'waiting', through_seconds: 10}});
+  flow.app.acceptState(canonicalState);
+  const originalRows = [...flow.$('transcript').children];
+  flow.$('transcript').scrollHeight = 1000; flow.$('transcript').clientHeight = 240; flow.$('transcript').scrollTop = 100;
+  const tailState = structuredClone(canonicalState);
+  tailState.provisional_asr = {enabled: true, state: 'completed', revision: 4, refresh_seconds: 3,
+    window_seconds: 15, window_start_seconds: 6, through_seconds: 12, published_at: 1000,
+    lines: [{id: 'p4-l0', text: 'A newly revised live tail.', start_seconds: 6, end_seconds: 12}], error: null,
+    schedule: {state: 'waiting', reason: 'recording', clock: 'audio', interval_seconds: 3, remaining_seconds: 3}};
+  const evidenceBeforeDisplay = JSON.stringify(tailState);
+  flow.app.acceptState(tailState);
+  assert.deepEqual(flow.$('transcript').children, [originalRows[0], flow.$('provisional-history'), flow.$('provisional-region')]);
+  assert.equal(flow.$('provisional-history').open, false, 'Overlapping recognitions do not both appear as contiguous speech');
+  assert.deepEqual(flow.$('provisional-history-lines').children, originalRows.slice(1));
+  assert.equal(flow.$('provisional-history-lines').children[0].textContent, canonicalRows[1].text, 'A straddling source row remains whole and explicitly available');
+  assert.equal(flow.$('provisional-history-lines').children[0].dataset.sourceId, 'crossing');
+  assert.equal(flow.$('provisional-lines').textContent, 'A newly revised live tail.');
+  assert.equal(flow.$('transcript').scrollTop, 100, 'The single reading scroller retains an earlier reading position');
+  assert.equal(JSON.stringify(tailState), evidenceBeforeDisplay, 'Display reconciliation never edits recognition evidence');
+  assert.equal(flow.$('asr-schedule-compact').textContent, '3秒', 'The main original starts with the real 3-second acquisition interval');
+  const previewTextNode = flow.$('provisional-lines').children[0];
+  let transcriptMoves = 0;
+  const originalInsert = flow.$('transcript').insertBefore;
+  flow.$('transcript').insertBefore = function (...args) { transcriptMoves++; return originalInsert.apply(this, args); };
+  const timerOnly = structuredClone(tailState); timerOnly.provisional_asr.schedule.remaining_seconds = 2;
+  flow.app.acceptState(timerOnly);
+  assert.equal(flow.$('asr-schedule-compact').textContent, '2秒');
+  assert.equal(flow.$('provisional-lines').children[0], previewTextNode);
+  assert.equal(transcriptMoves, 0, 'A schedule tick does not reconcile or rebuild the reading flow');
+  for (const reason of ['request', 'queued']) {
+    timerOnly.provisional_asr.schedule = {state: 'busy', reason, clock: 'audio', interval_seconds: 3};
+    flow.app.acceptState(structuredClone(timerOnly));
+    assert.doesNotMatch(flow.$('asr-schedule-compact').textContent, /秒/, 'Inference and queue contention have no completion ETA');
+    assert.match(flow.$('asr-schedule-compact').textContent, /認識/);
+  }
+  timerOnly.provisional_asr.schedule = {state: 'blocked', reason: 'stopped', clock: 'audio', interval_seconds: 3};
+  flow.app.acceptState(structuredClone(timerOnly));
+  assert.equal(flow.$('asr-schedule-compact').textContent, '停止');
+  const emptyPreview = structuredClone(tailState); emptyPreview.provisional_asr.lines = [];
+  flow.app.acceptState(emptyPreview);
+  assert.deepEqual(flow.$('transcript').children, originalRows, 'An empty preview restores all canonical rows instead of hiding them');
+  originalRows[1].focus();
+  flow.app.acceptState(tailState);
+  assert.equal(flow.$('provisional-history').open, true, 'A focused source remains accessible when it moves into the disclosure');
+  assert.equal(flow.dom.activeElement, originalRows[1]);
+  const advancedTail = structuredClone(tailState); advancedTail.provisional_asr.window_start_seconds = 9;
+  advancedTail.provisional_asr.revision = 5; advancedTail.provisional_asr.through_seconds = 15;
+  advancedTail.provisional_asr.lines = [{id: 'p5-l0', text: 'Next live revision.', start_seconds: 9, end_seconds: 15}];
+  flow.app.acceptState(advancedTail);
+  assert.equal(flow.$('transcript').children[1], originalRows[1], 'Canonical text returns above the window with its DOM node intact');
+  assert.deepEqual(flow.$('provisional-history-lines').children, [originalRows[2]]);
+  assert.equal(flow.$('provisional-lines').textContent, 'Next live revision.', 'Only the latest rolling snapshot remains in the main flow');
+  const canonicalCaughtUp = structuredClone(advancedTail); canonicalCaughtUp.asr.through_seconds = 15;
+  flow.app.acceptState(canonicalCaughtUp);
+  assert.deepEqual(flow.$('transcript').children, originalRows, 'Canonical catch-up restores the complete original flow');
+  assert.equal(flow.$('provisional-history').hidden, true);
+  const oldSchedule = structuredClone(canonicalCaughtUp); oldSchedule.provisional_asr.enabled = false;
+  oldSchedule.asr.schedule = {state: 'waiting', reason: 'recording', clock: 'audio', interval_seconds: 15, remaining_seconds: 15};
+  flow.app.acceptState(oldSchedule);
+  assert.equal(flow.$('asr-schedule-compact').textContent, '15秒', 'Old or disabled-preview sessions retain their actual canonical schedule');
 
   const splitSettings = new Map([['lecture-idle:v1:local:default', '{"version":1,"language":"ja"}']]);
   const splitStorage = {getItem: key => splitSettings.get(key), setItem: (key, value) => splitSettings.set(key, value)};

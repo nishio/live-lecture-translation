@@ -321,6 +321,8 @@ class LectureApp:
             result['updated_at'] = time.time()
             result['asr']['queue_seconds'] = max(0, result['capture']['audio_seconds'] - result['asr']['through_seconds'])
             result['asr']['schedule'] = self._asr_schedule_locked()
+            if result.get('provisional_asr') is not None:
+                result['provisional_asr']['schedule'] = self._provisional_schedule_locked()
             cloud_alive = bool(self.cloud_worker and self.cloud_worker.is_alive())
             result['processing_active'] = bool(cloud_alive or
                 (self.worker and self.worker.is_alive() and not self.worker_finishing))
@@ -401,6 +403,66 @@ class LectureApp:
             observed = self.recorder.snapshot()
             active = active or not (observed.get('stop_confirmed', False) and observed.get('callbacks_confirmed', False))
         self.state['processing_stop_status'] = 'stopping' if active else 'stopped'
+
+    def _provisional_schedule_locked(self):
+        """Schedule of the visible rolling text, separate from canonical ASR."""
+        stage = self.state.get('provisional_asr', {})
+        interval = stage.get('refresh_seconds', self.provisional_refresh_seconds)
+        result = {'state': 'idle', 'reason': 'no_source', 'clock': 'audio',
+                  'interval_seconds': interval, 'wait_seconds': interval,
+                  'remaining_seconds': None, 'due_at': None}
+        def status(state, reason):
+            result.update(state=state, reason=reason)
+            return result
+        if not stage.get('enabled'):
+            return status('idle', 'disabled')
+        if not self.state['session']:
+            return result
+        if self.result_dir is None:
+            return status('blocked', 'saved_view')
+        if stage['state'] == 'running':
+            return status('busy', 'request')
+        if stage['state'] == 'failed' or stage.get('error'):
+            return status('blocked', 'failed')
+        if self.state.get('processing_stop_requested'):
+            return status('blocked', 'stopped')
+        if self.closing or self.abort_processing.is_set() or self.inference_unconfirmed or stage['state'] == 'paused':
+            return status('blocked', 'closed')
+        if self._provisional_pending is not None:
+            return status('busy', 'queued')
+        capture, asr = self.state['capture'], self.state['asr']
+        if self.source_done.is_set():
+            if not self.audio_queue.empty() or asr['state'] == 'running':
+                return status('busy', 'queued')
+            if capture['state'] == 'failed':
+                return status('blocked', 'failed')
+            if (stage['state'] == 'completed' and max(stage.get('through_seconds', 0), asr['through_seconds'])
+                    + 1e-6 >= capture['audio_seconds']):
+                return status('complete', 'no_pending')
+            if asr['state'] == 'failed':
+                return status('blocked', 'failed')
+            return status('idle', 'finalizing')
+        if capture['state'] == 'stalled':
+            return status('blocked', 'stalled')
+        if capture['state'] == 'failed':
+            return status('blocked', 'failed')
+        if capture['state'] in {'stopping', 'completed'}:
+            return status('blocked', 'stopping')
+        audio, observed_at = capture.get('audio_seconds'), capture.get('last_audio_at')
+        if (type(audio) not in (int, float) or not math.isfinite(audio) or audio < 0
+                or type(interval) not in (int, float) or not math.isfinite(interval) or interval <= 0):
+            return status('blocked', 'unknown')
+        if capture['state'] in {'idle', 'starting'} or audio == 0:
+            return result
+        if (capture['state'] != 'recording' or type(observed_at) not in (int, float)
+                or not math.isfinite(observed_at) or not 0 <= time.time() - observed_at <= 12):
+            return status('blocked', 'unknown')
+        boundary = math.floor(audio / interval) * interval
+        covered = max(stage.get('through_seconds', 0), asr['through_seconds'])
+        if boundary > covered + 1e-6:
+            return status('busy', 'queued')
+        result['remaining_seconds'] = max(0, boundary + interval - audio)
+        return status('waiting', 'recording')
 
     def _asr_schedule_locked(self):
         """Report observed chunk progress, never an inference completion ETA."""

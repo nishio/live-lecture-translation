@@ -124,6 +124,50 @@ class DemoTests(unittest.TestCase):
         self.assertEqual([line['id'] for line in self.timeline.snapshot(21.999)['lines']], ['one'])
         self.assertEqual([line['id'] for line in self.timeline.snapshot(22)['lines']], ['one', 'two'])
 
+    def test_preview_schedule_uses_three_second_clock_and_recorded_admission(self):
+        self.provisional_fixture()
+        self.write('runtime-manifest.json', {'configuration': {'chunk_seconds': 15, 'pace': 1}})
+        timeline = DemoTimeline(self.directory, audio_file=self.wav_fixture())
+        for cursor, remaining in ((0, 3), (2.5, .5), (4, 2), (7, 2)):
+            state = timeline.snapshot(cursor)
+            schedule = state['provisional_asr']['schedule']
+            self.assertEqual(('waiting', 'recording', remaining),
+                             (schedule['state'], schedule['reason'], schedule['remaining_seconds']))
+            self.assertEqual(3, schedule['interval_seconds'])
+            self.assertEqual(15, state['asr']['schedule']['interval_seconds'])
+        for cursor, reason in ((3.05, 'queued'), (3.5, 'request'), (6.05, 'queued'), (6.5, 'request')):
+            state = timeline.snapshot(cursor)
+            schedule = state['provisional_asr']['schedule']
+            self.assertEqual(('busy', reason), (schedule['state'], schedule['reason']))
+            self.assertIsNone(schedule['remaining_seconds'])
+            self.assertIsNone(schedule['due_at'])
+        self.assertEqual('failed', timeline.snapshot(10)['provisional_asr']['schedule']['reason'])
+        # A later actually admitted request is busy even while its prior failure remains visible.
+        self.assertEqual('request', timeline.snapshot(18.5)['provisional_asr']['schedule']['reason'])
+        self.assertEqual('complete', timeline.snapshot(timeline.duration)['provisional_asr']['schedule']['state'])
+        self.assertEqual(3, timeline.snapshot(0)['provisional_asr']['schedule']['remaining_seconds'])
+        self.assertEqual([], timeline.snapshot(0)['provisional_asr']['lines'])
+
+    def test_preview_schedule_never_resets_countdown_during_long_first_request(self):
+        events = self.provisional_fixture()[:1]
+        events[0].update(published_at=1020.167, processing_seconds=17.067)
+        self.write_rows('provisional-history.jsonl', events)
+        self.write_rows('provisional-events.jsonl', [])
+        state = json.loads((self.directory / 'state.json').read_text())
+        state['provisional_asr'].update(events[0], lines=[])
+        self.write('state.json', state)
+        self.write('runtime-manifest.json', {'configuration': {'chunk_seconds': 15, 'pace': 1}})
+        timeline = DemoTimeline(self.directory, audio_file=self.wav_fixture())
+        for cursor in (3.5, 6, 10, 15, 20.166):
+            state = timeline.snapshot(cursor)
+            schedule = state['provisional_asr']['schedule']
+            self.assertEqual(('busy', 'request'), (schedule['state'], schedule['reason']))
+            self.assertIsNone(schedule['remaining_seconds'])
+            self.assertEqual([], state['provisional_asr']['lines'])
+        self.assertEqual(1, timeline.snapshot(20.167)['provisional_asr']['revision'])
+        self.assertNotIn('provisional_asr', self.timeline.snapshot(0))
+        self.assertEqual(15, self.timeline.snapshot(0)['asr']['schedule']['interval_seconds'])
+
     def test_provisional_publications_replace_only_the_temporary_view(self):
         events = self.provisional_fixture()
         timeline = DemoTimeline(self.directory)

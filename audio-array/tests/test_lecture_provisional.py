@@ -53,6 +53,51 @@ class ProvisionalTest(unittest.TestCase):
             out.writeframes(b'\x01\x00' * RATE * seconds)
         return path
 
+    def test_preview_schedule_tracks_three_second_audio_clock_and_actual_busy_state(self):
+        app = self.prepared_app()
+        self.capture(app, 2.5)
+        state = app.snapshot()
+        self.assertEqual(15, state['asr']['schedule']['interval_seconds'])
+        schedule = state['provisional_asr']['schedule']
+        self.assertEqual(('waiting', 'recording', 3, .5), (schedule['state'], schedule['reason'],
+                         schedule['interval_seconds'], schedule['remaining_seconds']))
+        observed = app.state['capture']['last_audio_at']
+        with patch.object(live.time, 'time', return_value=observed + 5):
+            self.assertEqual(.5, app.snapshot()['provisional_asr']['schedule']['remaining_seconds'])
+        self.capture(app, 3)
+        app.state['asr']['state'] = 'running'  # Canonical worker owns the shared model.
+        schedule = app.snapshot()['provisional_asr']['schedule']
+        self.assertEqual(('busy', 'queued'), (schedule['state'], schedule['reason']))
+        self.assertIsNone(schedule['remaining_seconds'])
+        app.state['provisional_asr']['state'] = 'running'
+        app.state['processing_stop_requested'] = True
+        schedule = app.snapshot()['provisional_asr']['schedule']
+        self.assertEqual(('busy', 'request'), (schedule['state'], schedule['reason']))
+        self.assertIsNone(schedule['due_at'])
+        app.state['provisional_asr']['state'] = 'paused'
+        self.assertEqual('stopped', app.snapshot()['provisional_asr']['schedule']['reason'])
+
+    def test_preview_schedule_keeps_stall_failure_and_unknown_separate_from_countdown(self):
+        app = self.prepared_app()
+        self.capture(app, 2.5)
+        app.state['capture']['state'] = 'stalled'
+        schedule = app.snapshot()['provisional_asr']['schedule']
+        self.assertEqual(('blocked', 'stalled'), (schedule['state'], schedule['reason']))
+        self.assertIsNone(schedule['remaining_seconds'])
+        app.state['capture'].update(state='recording', last_audio_at=time.time() - 20)
+        self.assertEqual('unknown', app.snapshot()['provisional_asr']['schedule']['reason'])
+        app.state['provisional_asr'].update(state='failed', error='synthetic failed preview')
+        self.assertEqual('failed', app.snapshot()['provisional_asr']['schedule']['reason'])
+        app.state['provisional_asr'].update(state='completed', error=None, through_seconds=12)
+        app.state['asr'].update(state='completed', through_seconds=15)
+        app.state['capture'].update(audio_seconds=16, last_audio_at=time.time())
+        schedule = app.snapshot()['provisional_asr']['schedule']
+        self.assertEqual(('waiting', 2), (schedule['state'], schedule['remaining_seconds']))
+        app.source_done.set()
+        app.state['asr']['through_seconds'] = 16
+        app.state['capture']['state'] = 'completed'
+        self.assertEqual('complete', app.snapshot()['provisional_asr']['schedule']['state'])
+
     def test_window_startup_trailing_bounds_and_final_partial(self):
         ends = [3, 6, 9, 12, 15, 18]
         previous = 0

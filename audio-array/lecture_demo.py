@@ -253,7 +253,7 @@ class DemoTimeline:
             elif final.get('lines') or final.get('published_at') is not None:
                 raise DemoDataError('速報の実公開記録がありません。推定で補いません。')
 
-    def _provisional_snapshot(self, at, asr_through):
+    def _provisional_snapshot(self, at, asr_through, capture_seconds, capture_state):
         published = [event for event in self.provisional_events if event['published_at'] <= at]
         latest = published[-1] if published else None
         result = {'enabled': self.provisional_enabled, 'state': 'waiting',
@@ -271,12 +271,15 @@ class DemoTimeline:
             failed = [event for event in outcomes if event['event'] == 'failed']
             result.update(state='failed' if outcomes[-1]['event'] == 'failed' else 'paused',
                           error=failed[-1]['error'] if failed else None)
-        elif any(event['started_at'] <= at < event['published_at'] for event in self.provisional_events):
+        if any(event['started_at'] <= at < event['published_at'] for event in self.provisional_events):
             result['state'] = 'running'
         if at >= self.started_at + self.duration:
             final = self.final.get('provisional_asr', {})
             if final.get('state') in {'failed', 'paused'}:
                 result.update(state=final['state'], error=final.get('error'))
+            elif final.get('state') in {'running', 'waiting'}:
+                result.update(state='paused', error='保存時の速報処理は未完了です。この再生では実行しません。')
+        result['schedule'] = self._provisional_schedule(at, result, capture_seconds, asr_through, capture_state)
         return result
 
     def _load_translations(self, measurements, line_publications):
@@ -405,6 +408,40 @@ class DemoTimeline:
                 state, error = 'paused', final.get('error') or '保存時の処理は未完了です。この再生では実行しません。'
         return state, error, diagnostics
 
+    def _provisional_schedule(self, at, stage, capture_seconds, asr_through, capture_state):
+        """Replay observed admission/publication, with only a nominal audio wait."""
+        interval = self.provisional_refresh
+        schedule = {'state': 'idle', 'reason': 'no_pending', 'clock': 'audio',
+                    'interval_seconds': interval, 'wait_seconds': interval,
+                    'remaining_seconds': None, 'due_at': None}
+        def status(state, reason):
+            return {**schedule, 'state': state, 'reason': reason}
+        if stage['state'] == 'running':
+            return status('busy', 'request')
+        if stage['state'] == 'failed':
+            return status('blocked', 'failed')
+        if stage['state'] == 'paused':
+            return status('blocked', 'stopped')
+        if at >= self.started_at + self.duration and self.final.get('processing_stop_requested'):
+            return status('blocked', 'stopped')
+        future = [event for event in self.provisional_events if event['published_at'] > at]
+        if any(event['ready_at'] <= at for event in future):
+            return status('busy', 'queued')
+        if capture_state in {'failed', 'stalled'}:
+            return status('blocked', capture_state)
+        covered = max(stage['through_seconds'], asr_through)
+        boundary = math.floor(capture_seconds / interval) * interval
+        if boundary > covered + 1e-6:
+            return status('busy', 'queued')
+        if capture_seconds >= self.audio_seconds:
+            if any(event['at'] > at for event in self.asr_events):
+                return status('busy', 'queued')
+            if covered + 1e-6 >= self.audio_seconds and not future:
+                return status('complete', 'no_pending')
+            return status('blocked', 'unknown')
+        schedule['remaining_seconds'] = max(0, min(self.audio_seconds, boundary + interval) - capture_seconds)
+        return status('waiting', 'recording')
+
     def _schedule(self, kind, events, at, state, capture_seconds, diagnostics=None):
         interval = self.configuration.get('chunk_seconds' if kind == 'asr' else kind + '_interval',
                                           15 if kind == 'asr' else 60 if kind == 'translation' else 120)
@@ -529,7 +566,8 @@ class DemoTimeline:
                                 'error': translation_error, 'retry_required': False, 'worker_alive': False,
                                 'schedule': self._schedule('translation', self.translation_events, at, translation_state, capture_seconds, translation_diagnostics)},
                 'lines': lines, 'analysis_history': history,
-                **({'provisional_asr': self._provisional_snapshot(at, asr_through)} if self.provisional_enabled else {}),
+                **({'provisional_asr': self._provisional_snapshot(at, asr_through, capture_seconds,
+                    'recording' if capture_seconds < self.audio_seconds else capture_state)} if self.provisional_enabled else {}),
                 'capabilities': {'cloud_enabled': False, 'continuous_translation': self.continuous, 'analysis_history_paging': False},
                 'message': '', 'demo': {'cursor_seconds': seconds, 'at': at, 'published_lines': len(lines), 'published_analyses': len(analyses),
                                        'published_translations': len(translation_events),
