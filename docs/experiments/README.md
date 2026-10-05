@@ -3,6 +3,8 @@
 For the new v0.9.0-based experimental branch, see the
 [Codex subscription text-processing probe](codex-subscription.md). Its fresh
 synthetic measurements are separate from the historical results below.
+The [Audrey subscription follow-up](audrey-subscription.md) applies the isolated
+transport to the existing real lecture's saved recognition output.
 
 These records summarize development measurements made before the standalone 0.9 extraction. They contain aggregate numbers and methodology only. Source recordings, recognized speech, translations, API payloads and responses, semantic-review excerpts, screenshots, authenticated URLs, and machine-specific paths are excluded.
 

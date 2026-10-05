@@ -1,5 +1,8 @@
 # Codex subscription text-processing experiment
 
+The subsequent [Audrey lecture trial](audrey-subscription.md) uses real saved ASR
+instead of the synthetic fixture described on this page.
+
 **Result:** ChatGPT-authenticated Codex completed translation and understanding
 support in this bounded synthetic case. Each workload produced two accepted
 outputs. Translation took 11.009–11.378 seconds; analysis took 22.878–23.673

@@ -64,3 +64,10 @@ validators without wiring Codex into the live coordinator. Each trial has its
 own process, private artifacts, completion checks, and timeout. API accounting
 and the normal capture/ASR/translation/analysis paths are unchanged. See the
 [experiment method and measurements](experiments/codex-subscription.md).
+
+`lecture_subscription_replay.py` extends this experiment to a hash-bound saved
+transcript. It pre-plans bounded chronological source prefixes, FIFO translation
+and recent-window analysis, then records actual completion separately from
+assumed planning coverage. It runs calls sequentially without real-time pacing;
+utterance end times stand in for availability and do not reproduce ASR publication.
+See the [Audrey saved-text trial](experiments/audrey-subscription.md).

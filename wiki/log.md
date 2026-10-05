@@ -1,5 +1,34 @@
 # Wiki log
 
+## [2026-10-05] experiment | Audrey saved ASR through the subscription path
+
+At the user's request, ran the existing reviewed Audrey lecture transcript
+through the ChatGPT-authenticated Codex adapter in the isolated v0.9.0-based
+worktree. Added a hash-bound, call-capped saved-text replay runner with explicit
+completed, failed and pending states. All nine requests completed: six
+translations covered all 47 eligible source rows in 12 blocks and three
+analyses were saved. Fifteen uncertain source rows remained excluded as targets.
+
+The sequential processing loop took 197.406 seconds; median translation and
+analysis calls took 13.818 and 36.564 seconds. This accelerated source-end-time
+replay does not measure ASR publication time, live latency or long-session
+capacity. Reviewed all generated blocks and analyses against their saved source
+selections. Recorded a negation/fragment risk at an uncertainty boundary,
+qualification loss in an analysis headline, and recurring terminology variation.
+This review is not an audio-based accuracy score or a matched API comparison.
+
+Codex reported 106,654 input and 5,263 output tokens, plus a separately reported
+389 reasoning-output field that is not added again to output tokens. No
+application API-key requests were made. Subscription allowance percentage,
+currency allocation, development usage and electricity remain unmeasured.
+Private source snapshots, requests and generated results stay ignored; only
+methodology and content-free aggregates enter Git.
+
+Validation ran 360 CPU tests: 358 passed and two optional native capture tests
+were skipped. Both Node UI checks passed. Updated the topic, canonical experiment
+and architecture/configuration documents, this index, then the log. Concurrent
+development, live runtime and the v0.9.0 baseline remain unchanged.
+
 ## [2026-10-05] experiment | Codex subscription from stable v0.9.0
 
 Created the user-requested isolated `experiment/codex-subscription` worktree from

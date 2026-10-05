@@ -1,0 +1,274 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-05",
+  "experiment": "Audrey saved ASR via ChatGPT-authenticated Codex",
+  "baseline_tag": "v0.9.0",
+  "baseline_commit": "976c4508d5ee13019f879a5aee8d0a7c9509c767",
+  "parent_experiment_commit": "4d5fc33",
+  "requested_model": "gpt-6.1-sol",
+  "served_model_independently_confirmed": false,
+  "cli_version": "0.159.0-alpha.12.1",
+  "reasoning_effort": "low",
+  "authentication": "chatgpt",
+  "source": {
+    "sample": "audrey-plurality-seoul-2023",
+    "speaker": "Audrey Tang",
+    "publisher": "Code for Japan",
+    "source_url": "https://www.youtube.com/watch?v=4_tge6XJhGA",
+    "license_notice": "CC BY; version not specified in saved source metadata",
+    "transcript_sha256": "78cf9ca665c668e24038bdffa145f3c21ed2e611d6205f2b07c1f587c19edc81",
+    "audio_duration_seconds": 325.567,
+    "last_source_end_seconds": 324.54,
+    "recognized_rows": 62,
+    "uncertain_rows": 15,
+    "eligible_translation_rows": 47
+  },
+  "method": "offline_saved_text_prefix_replay",
+  "settings": {
+    "duration": 325.567,
+    "translation_interval": 60.0,
+    "analysis_interval": 120.0,
+    "analysis_window": 180.0,
+    "max_calls": 9,
+    "max_analysis_lines": 100
+  },
+  "status": "completed",
+  "planned_model_invocations": 9,
+  "completed_model_invocations": 9,
+  "failed_model_invocations": 0,
+  "coverage": {
+    "eligible_rows": 47,
+    "covered_rows": 47,
+    "pending_rows": 0,
+    "duplicate_ids": 0,
+    "translation_blocks": 12,
+    "analysis_results": 3
+  },
+  "processing_loop_elapsed_seconds": 197.40619520901237,
+  "timing": {
+    "translation": {
+      "count": 6,
+      "min_seconds": 9.758016292005777,
+      "median_seconds": 13.817966666494613,
+      "max_seconds": 20.149562125006923
+    },
+    "analysis": {
+      "count": 3,
+      "min_seconds": 34.220697834010934,
+      "median_seconds": 36.56422112500877,
+      "max_seconds": 37.68898316702689
+    }
+  },
+  "calls": [
+    {
+      "sequence": 1,
+      "kind": "translation",
+      "cutoff_seconds": 60.0,
+      "source_count": 17,
+      "target_count": 6,
+      "elapsed_seconds": 11.94331274999422,
+      "provider_elapsed_seconds": 11.933150791999651,
+      "block_count": 2,
+      "usage": {
+        "input_tokens": 11198,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 257,
+        "reasoning_output_tokens": 0
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 5856
+    },
+    {
+      "sequence": 2,
+      "kind": "translation",
+      "cutoff_seconds": 120.0,
+      "source_count": 24,
+      "target_count": 9,
+      "elapsed_seconds": 19.78162575000897,
+      "provider_elapsed_seconds": 19.769261666981038,
+      "block_count": 2,
+      "usage": {
+        "input_tokens": 11701,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 533,
+        "reasoning_output_tokens": 163
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 7528
+    },
+    {
+      "sequence": 3,
+      "kind": "analysis",
+      "cutoff_seconds": 120.0,
+      "source_count": 15,
+      "target_count": 0,
+      "elapsed_seconds": 36.56422112500877,
+      "provider_elapsed_seconds": 36.54184495899244,
+      "summary_count": 4,
+      "concept_count": 1,
+      "usage": {
+        "input_tokens": 12288,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1037,
+        "reasoning_output_tokens": 0
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 10708
+    },
+    {
+      "sequence": 4,
+      "kind": "translation",
+      "cutoff_seconds": 180.0,
+      "source_count": 14,
+      "target_count": 6,
+      "elapsed_seconds": 11.58037474998855,
+      "provider_elapsed_seconds": 11.560265332984272,
+      "block_count": 2,
+      "usage": {
+        "input_tokens": 11051,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 246,
+        "reasoning_output_tokens": 0
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 5690
+    },
+    {
+      "sequence": 5,
+      "kind": "translation",
+      "cutoff_seconds": 240.0,
+      "source_count": 17,
+      "target_count": 9,
+      "elapsed_seconds": 20.149562125006923,
+      "provider_elapsed_seconds": 20.134805084002437,
+      "block_count": 3,
+      "usage": {
+        "input_tokens": 11241,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 523,
+        "reasoning_output_tokens": 226
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 6266
+    },
+    {
+      "sequence": 6,
+      "kind": "analysis",
+      "cutoff_seconds": 240.0,
+      "source_count": 24,
+      "target_count": 0,
+      "elapsed_seconds": 34.220697834010934,
+      "provider_elapsed_seconds": 34.209671707998496,
+      "summary_count": 4,
+      "concept_count": 2,
+      "usage": {
+        "input_tokens": 13133,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1013,
+        "reasoning_output_tokens": 0
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 13426
+    },
+    {
+      "sequence": 7,
+      "kind": "translation",
+      "cutoff_seconds": 300.0,
+      "source_count": 21,
+      "target_count": 13,
+      "elapsed_seconds": 15.692620582995005,
+      "provider_elapsed_seconds": 15.677515375020448,
+      "block_count": 2,
+      "usage": {
+        "input_tokens": 11477,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 372,
+        "reasoning_output_tokens": 0
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 6900
+    },
+    {
+      "sequence": 8,
+      "kind": "translation",
+      "cutoff_seconds": 325.567,
+      "source_count": 15,
+      "target_count": 4,
+      "elapsed_seconds": 9.758016292005777,
+      "provider_elapsed_seconds": 9.737464042002102,
+      "block_count": 1,
+      "usage": {
+        "input_tokens": 11007,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 160,
+        "reasoning_output_tokens": 0
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 5359
+    },
+    {
+      "sequence": 9,
+      "kind": "analysis",
+      "cutoff_seconds": 325.567,
+      "source_count": 29,
+      "target_count": 0,
+      "elapsed_seconds": 37.68898316702689,
+      "provider_elapsed_seconds": 37.66855041598319,
+      "summary_count": 4,
+      "concept_count": 1,
+      "usage": {
+        "input_tokens": 13558,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1122,
+        "reasoning_output_tokens": 0
+      },
+      "structural_validation": "passed",
+      "request_input_bytes": 14589
+    }
+  ],
+  "reported_usage": {
+    "input_tokens": 106654,
+    "output_tokens": 5263,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "reasoning_output_tokens": 389
+  },
+  "invocations_without_usage": 0,
+  "application_api_key_requests": 0,
+  "measured_api_cost_usd": null,
+  "subscription_allowance_consumption": "not measured",
+  "subscription_fee_allocation": "not measured",
+  "development_and_energy_cost": "not measured",
+  "quality_evaluation": "model-assisted saved-source/output review; not audio ground truth or matched API benchmark",
+  "known_findings": [
+    "uncertain negation in context excluded from targets leaves a positive-looking translated fragment",
+    "one analysis headline drops a causal uncertainty retained by its own summary",
+    "one early analysis flow describes a trend when source only reports population level",
+    "recurring core-term rendering varies across translation and analysis calls"
+  ],
+  "validation": {
+    "python_total": 360,
+    "python_passed": 358,
+    "python_native_skipped": 2,
+    "node_ui_checks_passed": 2
+  },
+  "limits": [
+    "one full run",
+    "accelerated sequential source-prefix processing",
+    "source end times are not ASR publication times",
+    "no capture or fresh ASR",
+    "analysis uses last180seconds and is not whole-lecture synthesis",
+    "historical API source windows and prompt/runtime differ",
+    "no direct quota percentage or currency measurement",
+    "CPU regression tests ran concurrently during early generation calls"
+  ]
+}

@@ -1,8 +1,9 @@
 # Cloud configuration
 
 The isolated experimental branch includes a [Codex subscription probe](experiments/codex-subscription.md)
-for synthetic text. It has its own explicit invocation and does not change the
-live application's API-key configuration described below.
+for synthetic text and a [saved-lecture text trial](experiments/audrey-subscription.md).
+Each requires an explicit invocation and does not change the live application's
+API-key configuration described below.
 
 Cloud processing sends recognized speech and selected transcript context for translation and analysis. The normal microphone workflow does not send the recorded audio. A key alone is insufficient: the application also requires a local authorization file defining the permitted text scope and budget.
 

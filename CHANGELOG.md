@@ -2,6 +2,9 @@
 
 ## Unreleased — subscription experiment branch
 
+- Adds a hash-bound saved-transcript subscription replay and an Audrey lecture
+  experiment, with bounded calls, chronological source selection, separate
+  planned/actual coverage, and retained failed/pending work.
 - Adds an opt-in, synthetic-text Codex subscription probe with isolated CLI
   execution, existing translation/analysis validators, private attempt records,
   and explicit failures/pending work. It does not change the live provider.

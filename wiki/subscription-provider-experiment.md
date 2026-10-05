@@ -49,8 +49,8 @@ because the independent analysis subsequently fails.
 
 ## What remains
 
-The synthetic experiment evaluates feasibility and a small meaning-preservation
-case. It does not measure microphone/ASR latency, listening comprehension,
+The synthetic experiment and the real-source follow-up below evaluate feasibility
+and bounded meaning-preservation cases. They do not measure microphone/ASR latency, listening comprehension,
 long-session subscription capacity, cancellation of remote work, or behavior
 after real allowance exhaustion/authentication expiry. Production integration
 still needs user-facing provider selection, authorized transcript scope,
@@ -61,3 +61,29 @@ requested here; API charge reconciliation, subscription quota consumption,
 subscription-fee allocation, development-assistant use, and electricity are not
 measured. Keep all generated content and invocation artifacts in ignored
 results; publish only content-free aggregates and methodology.
+
+## Real-source follow-up: Audrey lecture
+
+The user requested the existing Audrey source instead of synthetic data. A
+hash-bound snapshot of the reviewed public sample's 62 saved ASR rows was
+processed through a new offline prefix runner. The [Audrey experiment record](../docs/experiments/audrey-subscription.md)
+and content-free aggregate separate it from the earlier synthetic trials.
+
+All nine calls completed: six translation calls covered 47 eligible rows in
+12 blocks with no missing/duplicate/pending targets, and three recent-window
+analyses were saved. Median translation/analysis times were 13.818/36.564 seconds;
+sequential processing took 197.406 seconds for a source recording of 325.567
+seconds. No audio/ASR or wall-clock source replay was performed. Historical API
+analysis windows and prompts differ, so this is not a matched comparison.
+
+The main reusable findings are an uncertain-negation boundary that leaves a
+misleading positive-looking target fragment, an analysis headline that drops
+its own body's causal qualification, and inconsistent rendering of a recurring
+term across calls. Complete coverage alone cannot detect these problems.
+Preserve the observations; do not silently repair source text or infer that
+subscription authentication caused them. Keep new generated output private.
+
+The nine calls reported 106,654 input and 5,263 output tokens. No application
+API-key calls were made; subscription allowance percentage and currency
+allocation were not measured. CPU regression validation passed 358 tests,
+with two optional native tests skipped, and both Node UI checks passed.
