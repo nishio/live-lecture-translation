@@ -240,3 +240,67 @@ ffmpeg -nostdin -n -xerror \
 `-f 140` は今回使用したAAC音声の形式IDです。利用できなければ別形式へ自動で切り替えず、取得条件を確認してください。`ffmpeg -xerror` はデコードエラー時に失敗させ、`-n` は既存WAVの上書きを防ぎます。今回の変換結果は325.567秒、5,209,072フレームでした。再取得した入力は `check` の長さ・SHA256をサンプルの[provenance.json](../samples/audrey-plurality-seoul-2023/provenance.json)と照合し、一致しない入力を同一条件と扱わないでください。
 
 **音声・動画・配布字幕・取得メタデータ原本はリポジトリに含めません。** 公開英語・日本語字幕を別途取得して比較する場合もignored領域に置き、アプリのASR・翻訳出力と区別します。上の準備と入力チェックは、認識や翻訳の実行・精度検証ではありません。
+
+<a id="audrey-demo"></a>
+
+## Audreyの講演でデモを作って見る
+
+Audrey Tangの約5分26秒の講演全体を使い、原文・日本語訳・要点が音声とともに現れるデモを手元のMacで作れます。[15/60秒の並列処理デモ](experiments/parallel-cloud-audrey.md)と同じ設定で新しく生成する手順です。**初回の生成にはローカル音声認識と有料APIを使います。保存後の再生には、認識の再実行や追加API通信はありません。** 公開されている[テキストサンプル](../samples/audrey-plurality-seoul-2023/README.md)だけで、このデモを再生することはできません。
+
+### 1. 音声とAPI設定を準備する
+
+[実行環境の準備](#1-実行環境を準備する)を済ませ、[Audrey音声の取得・変換](#単独講演の入力例)に従って `data/public-audio/audrey-plurality-seoul-2023/audrey-plurality-seoul.wav` を用意します。リポジトリのディレクトリで次を実行し、全長の入力を確認します。
+
+```sh
+mkdir -p data/audrey-demo
+.venv/bin/python audio-array/lecture_experiment.py check \
+  data/public-audio/audrey-plurality-seoul-2023/audrey-plurality-seoul.wav \
+  > data/audrey-demo/check.json
+cat data/audrey-demo/check.json
+```
+
+`input.duration_seconds` が約325.567秒であることを確認し、**このチェック結果の `input.path` と `input.sha256`** を使います。[有料APIの設定手順](#b-日本語訳と要点も生成する有料api)に従い、`config/experiment.local.json` にその音声の許可、実行日、支出上限を設定し、`config/experiment.local.env` にAPIキーを保存してください。既存の設定があれば内容を確認して再利用でき、別の音声の許可は消さずに `replay_sources` へ今回の項目を追加します。先頭2分用のパス・ハッシュは流用しません。
+
+### 2. 講演全体からデモ用の結果を生成する
+
+保存する原文は15秒単位、速報は3秒ごとに直近最大15秒を認識します。翻訳の開始間隔を15秒、要点・概念説明を60秒にし、英語音声を1倍速で処理します。翻訳と分析は初回翻訳の待機後、それぞれ1件ずつ並列に動けます。指定間隔は結果の到着時間を保証するものではありません。
+
+```sh
+.venv/bin/python audio-array/lecture_experiment.py run \
+  data/public-audio/audrey-plurality-seoul-2023/audrey-plurality-seoul.wav \
+  --label audrey-demo-15-60 --language en --pace realtime \
+  --chunk-seconds 15 --provisional-refresh-seconds 3 \
+  --provisional-window-seconds 15 \
+  --translation-interval 15 --analysis-interval 60 \
+  --cloud --authorization config/experiment.local.json \
+  --key-file config/experiment.local.env --model gpt-6.1-sol \
+  > data/audrey-demo/run-result.json
+```
+
+`--seconds` を付けずに全体を処理するため、約5分26秒と残り処理の時間がかかります。終了したら `cat data/audrey-demo/run-result.json` で `status: "completed"` と `completion_confirmed: true` を確認します。今回の確定API費用は `cost_report.confirmed_api_usd`、未確定の保持予約は `cost_report.retained_reservation_usd` です。過去のデモと出力・所要時間・費用が同じになるとは限りません。生成をやり直すときは、以前の結果への参照を残すため、出力JSONの名前も変えてください。
+
+### 3. 保存したデモを音声付きで再生する
+
+```sh
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+result_path = Path("data/audrey-demo/run-result.json")
+if not result_path.exists() or not result_path.read_text().strip():
+    raise SystemExit("実行結果がありません。runの終了とターミナルのエラーを確認してください。")
+result = json.loads(result_path.read_text())
+if result.get("status") != "completed" or result.get("completion_confirmed") is not True:
+    raise SystemExit("処理は未完了です。run-result.jsonと保存された記録を確認してください。")
+run = json.loads(Path(result["manifest"]).read_text())
+subprocess.run([
+    sys.executable, "audio-array/lecture_demo.py",
+    "--session", str(Path(run["state_path"]).parent),
+    "--audio-file", run["input"]["path"], "--port", "0",
+], check=True)
+PY
+```
+
+表示されたローカルURLを開き、「再生」を押します。一時停止やスライダーでの移動もできます。見終わったらターミナルでCtrl+Cを押します。もう一度見るときは、この手順3だけを実行します。音声と保存結果はgit管理対象外の `data/`・`results/` に残します。

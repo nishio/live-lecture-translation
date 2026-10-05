@@ -38,13 +38,21 @@ Download or clone the repository, then run the initial setup from its directory.
 
 ## Try it before a live lecture
 
-Before using the application at a lecture, try an existing recording on your Mac to see how transcription, Japanese translation, and key points appear.
+### Watch an Audrey talk demo
 
-Follow the [recorded-audio guide](docs/audio-experiments.md), starting with the first two minutes of an English recording. You can use MP3, M4A, WAV, or a video with audio. Choose transcription alone or add Japanese translation and key points through the paid API, then view the results with audio playback. No microphone is needed.
+Use [Audrey Tang's approximately 5-minute-26-second talk](https://www.youtube.com/watch?v=4_tge6XJhGA), published by Code for Japan, to try the original text, Japanese translation and current understanding view while listening. No microphone is needed. This walkthrough uses nominal three-second original-text previews, translation starts every 15 seconds and understanding updates every 60 seconds, with the two cloud stages running independently.
 
-Explore the [sample output](samples/audrey-plurality-seoul-2023/README.md) to see the English transcription, Japanese translation, key points, concept explanations, and actual API cost. The source is [Audrey Tang's lecture](https://www.youtube.com/watch?v=4_tge6XJhGA), published by Code for Japan with a CC BY license notice. Reading the sample requires no setup or API use. The generated output is uncorrected.
+1. Follow the [Audrey demo walkthrough](docs/audio-experiments.md#audrey-demo) to obtain the audio and configure your API key, permitted text and spending limit.
+2. Run the provided command to generate transcription, Japanese translation and understanding results for the full talk. Allow the 5-minute-26-second audio duration plus model preparation and remaining processing time. This generation step does not play sound through the speakers.
+3. Once processing completes, run the saved-result playback command. Open the displayed local URL and press **「▶再生」** to play the audio and screen together at 1×. You can pause, seek and restart.
 
-Audio is not included. To try the same lecture audio, follow the [acquisition and conversion instructions](docs/audio-experiments.md#単独講演の入力例).
+**Initial translation and understanding generation use the paid API. Replaying the saved results makes no additional API requests or charges.** Audio and ready-to-play demo data are not bundled, so this walkthrough creates a demo on your Mac. Generated wording and publication times vary between runs. See the [measured results and costs for these settings](docs/experiments/parallel-cloud-audrey.md).
+
+To read examples without setup, explore the [public text sample](samples/audrey-plurality-seoul-2023/README.md) from an earlier run. It contains excerpts of the original text, translation, key points and concept explanations; it is not the playback screen. The source carries a CC BY notice, with attribution, transformation and uncertainty notes preserved. Generated output is uncorrected.
+
+### Try your own recording
+
+Follow the [recorded-audio guide](docs/audio-experiments.md), starting with the first two minutes of an English recording. You can use MP3, M4A, WAV, or a video with audio. Choose transcription alone or add Japanese translation and key points through the paid API, then view the results with audio playback.
 
 ## Use with a microphone
 
