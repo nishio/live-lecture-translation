@@ -29,7 +29,7 @@
     "first_nonempty_publication_limit_seconds": 6,
     "first_nonempty_reference": "Actual audio supply start; session-relative observations include pre-supply startup overhead and are conservative upper bounds.",
     "continuing_updates_required": true,
-    "combined_verdict": "passed_startup_for_two_asr_only_runs_and_cloud_followup"
+    "combined_verdict": "passed_startup_for_two_asr_only_runs_and_two_cloud_followups; translation_first_order_verified_in_fourth_run"
   },
   "runs": [
     {
@@ -146,6 +146,76 @@
         "general_integrity_audit_unverified_items": 0,
         "initial_general_integrity_audit_error": "successful_cost_aggregate_mismatch"
       }
+    },
+    {
+      "label": "full recording with translation-first startup",
+      "provider": "openai",
+      "generation_model": "gpt-6.1-sol",
+      "reasoning_effort": "low",
+      "service_tier": "default",
+      "initial_translation_first": true,
+      "translation_interval_seconds": 60,
+      "analysis_interval_seconds": 120,
+      "completion_confirmed": true,
+      "input_seconds": 325.567,
+      "input_sha256": "da7a7c8202a28b24e3a24a0bcfd7f4da0a786c30884975101d60a876c34301f3",
+      "preparation_seconds": 9.257603790989378,
+      "first_nonempty_publication_seconds_from_session_start": 4.262725114822388,
+      "first_canonical_publication_seconds_from_session_start": 16.22073221206665,
+      "first_translation_started_seconds_from_session_start": 16.237754106521606,
+      "first_translation_publication_seconds_from_session_start": 21.255518913269043,
+      "first_translation_generation_seconds": 5.000542833004147,
+      "first_analysis_publication_seconds_from_session_start": 22.487122297286987,
+      "first_analysis_cache_hit": true,
+      "preview_count": 87,
+      "canonical_chunk_count": 22,
+      "canonical_line_count": 62,
+      "eligible_source_count": 59,
+      "translated_source_count": 59,
+      "missing_translation_target_count": 0,
+      "duplicate_translation_target_count": 0,
+      "combined_publication_interval_count": 108,
+      "combined_publication_interval_median_seconds": 2.9780770540237427,
+      "combined_publication_interval_max_seconds": 3.839890718460083,
+      "preview_ready_to_publication_median_seconds": 0.9798872470855713,
+      "preview_ready_to_publication_max_seconds": 1.8882718086242676,
+      "last_publication_seconds_from_session_start": 354.5103590488434,
+      "translation_result_count": 7,
+      "translation_cache_hits": 0,
+      "analysis_result_count": 4,
+      "analysis_cache_hits": 1,
+      "new_api_request_count": 10,
+      "additional_api_usd": 0.127395,
+      "new_retained_reservation_usd": 0,
+      "accounting": {
+        "confirmed_before_usd": 0.3352145,
+        "confirmed_after_usd": 0.4626095,
+        "retained_prior_reservation_before_usd": 0.178775,
+        "retained_prior_reservation_after_usd": 0.178775,
+        "prior_reservation_records_unchanged": true,
+        "all_prior_ledger_records_unchanged": true,
+        "prior_ledger_record_count": 33,
+        "new_completed_ledger_record_count": 10,
+        "daily_authorized_budget_usd": 1,
+        "daily_limit_changed": false,
+        "available_after_holds_usd": 0.3586155,
+        "new_ledger_cost_matches_histories_and_cost_report": true
+      },
+      "verification": {
+        "all_five_stages_completed": true,
+        "runtime_saved_source_hashes_match_experiment_files": true,
+        "canonical_pcm_verified_chunks": 22,
+        "preview_pcm_verified_windows": 87,
+        "causal_publication_times_and_independent_preview_ids": true,
+        "preview_publication_and_backward_seek_boundaries_checked": 87,
+        "general_integrity_audit": "passed",
+        "general_integrity_audit_checks": 1042,
+        "general_integrity_audit_errors": 0,
+        "general_integrity_audit_warnings": 0,
+        "general_integrity_audit_unverified_items": 0
+      },
+      "experiment_at_start_code_file_count": 63,
+      "experiment_at_start_code_identity": "ab32c5cab206a6ed21839125b9c5d4d15e59f175abb0fe675c7efdc404ed6f43"
     }
   ],
   "timing_definitions": {
@@ -188,5 +258,51 @@
     "comprehension_improvement_measured": false,
     "development_assistant_usage": "not measured",
     "electricity": "not measured"
+  },
+  "translation_first_followup": {
+    "status": "completed_and_verified",
+    "input_sha256": "da7a7c8202a28b24e3a24a0bcfd7f4da0a786c30884975101d60a876c34301f3",
+    "provider": "openai",
+    "initial_translation_first": true,
+    "historical_baseline": {
+      "run_label": "full recording with cloud follow-up",
+      "first_canonical_publication_seconds_from_session_start": 16.08939480781555,
+      "first_analysis_publication_seconds_from_session_start": 16.158827781677246,
+      "first_translation_started_seconds_from_session_start": 60.02285957336426,
+      "first_translation_publication_seconds_from_session_start": 60.095178842544556,
+      "ready_translation_targets_at_first_canonical_publication": 1,
+      "timestamps_retimed": false
+    },
+    "acceptance": {
+      "first_ready_translation_admitted_before_initial_automatic_analysis": true,
+      "first_translation_published_before_initial_analysis": true,
+      "all_eligible_targets_translated_once": true,
+      "all_five_stages_completed": true,
+      "history_report_and_ledger_cost_agree": true
+    },
+    "regression": {
+      "python_total": 541,
+      "python_passed": 539,
+      "python_opt_in_native_skipped": 2,
+      "python_seconds": 111.593,
+      "node_suites_passed": 2,
+      "code_file_count": 63,
+      "code_identity": "ab32c5cab206a6ed21839125b9c5d4d15e59f175abb0fe675c7efdc404ed6f43",
+      "code_identity_method": "SHA-256 of sorted records: relative_path + NUL + file_sha256 + LF."
+    },
+    "run_label": "full recording with translation-first startup",
+    "post_run_ui_followup": {
+      "change": "Preserve dynamic empty-state hints when returning to live view; add regression assertion.",
+      "node_suites_passed": 2,
+      "python_changed": false,
+      "additional_model_or_api_work": false,
+      "saved_runtime_results_changed": false,
+      "code_file_count": 63,
+      "code_identity": "13182e57247e05248a260a9fd455c5c1f5481eabfe420444d1e67f33fc3c9815",
+      "code_identity_scope": "UI and assertion follow-up after the actual run; the experiment retains its ab32c5cab206a6ed21839125b9c5d4d15e59f175abb0fe675c7efdc404ed6f43 identity.",
+      "code_identity_method": "SHA-256 of sorted records: relative_path + NUL + file_sha256 + LF.",
+      "visual_check": "Actual player at cursor 20 showed translation being prepared and analysis queued without a headline; cursor 22 showed translation without a headline; cursor 23 showed the headline. Reset to 0 removed future results and showed original/translation waiting hints.",
+      "browser_render_latency_measured": false
+    }
   }
 }

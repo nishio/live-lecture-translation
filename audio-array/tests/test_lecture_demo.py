@@ -570,6 +570,88 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(timeline.snapshot(35)['translation']['schedule']['state'], 'complete')
         self.assertEqual(timeline.snapshot(35)['capture']['audio_seconds'], 20)
 
+    def initial_translation_fixture(self, marker=True):
+        self.continuous_fixture()
+        runtime = json.loads((self.directory / 'runtime-manifest.json').read_text())
+        if marker is not None:
+            runtime['configuration']['initial_translation_first'] = marker
+        self.write('runtime-manifest.json', runtime)
+        measured = [json.loads(line) for line in (self.directory / 'measurements.jsonl').read_text().splitlines()]
+        first_analysis = next(row for row in measured if row['stage'] == 'analysis')
+        first_analysis.update(published_at=1020, processing_seconds=2)  # starts after translation publication at 1018
+        self.write_rows('measurements.jsonl', measured)
+        return measured
+
+    def test_initial_translation_schedule_follows_recorded_admission_and_publication(self):
+        self.initial_translation_fixture()
+        timeline = DemoTimeline(self.directory)
+        self.assertNotEqual(timeline.snapshot(11.999)['analysis']['schedule']['reason'], 'initial_translation')
+        for at in (12, 14.999):
+            state = timeline.snapshot(at)
+            self.assertEqual(state['analysis']['schedule']['reason'], 'initial_translation')
+            self.assertEqual(state['analysis']['schedule']['state'], 'waiting')
+            self.assertIsNone(state['analysis']['schedule']['remaining_seconds'])
+            self.assertIsNone(state['analysis']['schedule']['due_at'])
+            self.assertIsNone(state['analysis']['result'])
+            self.assertEqual(state['translation']['blocks'], [])
+        for at in (15, 17.999):
+            self.assertEqual(timeline.snapshot(at)['analysis']['schedule']['reason'], 'shared_slot')
+        first_translation = timeline.snapshot(18)
+        self.assertEqual(first_translation['analysis']['schedule']['reason'], 'request')
+        self.assertEqual(first_translation['translation']['blocks'][0]['published_at'], 1018)
+        self.assertIsNone(first_translation['analysis']['result'])
+        self.assertIsNone(timeline.snapshot(19.999)['analysis']['result'])
+        self.assertEqual(timeline.snapshot(20)['analysis']['generated_at'], 1020)
+        self.assertEqual(timeline.snapshot(12)['analysis']['schedule']['reason'], 'initial_translation', 'Rewinding restores only the recorded initial wait')
+
+    def test_initial_translation_failure_releases_saved_analysis_without_fake_success(self):
+        measured = self.initial_translation_fixture()
+        self.write_rows('translation-history.jsonl', [])
+        self.write_rows('measurements.jsonl', [row for row in measured if row['stage'] != 'translation'])
+        state = json.loads((self.directory / 'state.json').read_text())
+        state['translation'].update(state='failed', error='synthetic preparation failure', blocks=[])
+        self.write('state.json', state)
+        self.write_rows('generation-events.jsonl', [{'stage': 'translation', 'event': 'failed', 'at': 1014,
+                                                    'error': {'category': 'local_or_validation'}}])
+        timeline = DemoTimeline(self.directory)
+        self.assertEqual(timeline.snapshot(13.999)['analysis']['schedule']['reason'], 'initial_translation')
+        failed = timeline.snapshot(14)
+        self.assertNotEqual(failed['analysis']['schedule']['reason'], 'initial_translation')
+        self.assertEqual(failed['translation']['state'], 'failed')
+        self.assertEqual(failed['translation']['blocks'], [])
+        self.assertIsNone(failed['analysis']['result'])
+        self.assertEqual(timeline.snapshot(20)['analysis']['generated_at'], 1020)
+        self.assertEqual(timeline.snapshot(20)['translation']['blocks'], [])
+
+    def test_initial_translation_policy_never_reorders_old_or_conflicting_histories(self):
+        original_state = json.loads((self.directory / 'state.json').read_text())
+        original_transcripts = deepcopy(self.transcripts)
+        def reset_sources():
+            self.write('state.json', original_state)
+            self.transcripts = deepcopy(original_transcripts)
+        for marker in (None, False, 'true', 1):
+            reset_sources()
+            self.initial_translation_fixture(marker)
+            timeline = DemoTimeline(self.directory)
+            self.assertNotEqual(timeline.snapshot(12)['analysis']['schedule']['reason'], 'initial_translation')
+            self.assertEqual(timeline.snapshot(18)['translation']['blocks'][0]['published_at'], 1018)
+            self.assertEqual(timeline.snapshot(20)['analysis']['generated_at'], 1020)
+        reset_sources()
+        self.continuous_fixture()  # Historical analysis at 1015 precedes translation at 1018.
+        runtime = json.loads((self.directory / 'runtime-manifest.json').read_text())
+        runtime['configuration']['initial_translation_first'] = True
+        self.write('runtime-manifest.json', runtime)
+        timeline = DemoTimeline(self.directory)
+        self.assertNotEqual(timeline.snapshot(12)['analysis']['schedule']['reason'], 'initial_translation')
+        self.assertEqual(timeline.snapshot(15)['analysis']['generated_at'], 1015)
+        self.assertEqual(timeline.snapshot(15)['translation']['blocks'], [])
+        reset_sources()
+        self.initial_translation_fixture()
+        self.write_rows('generation-events.jsonl', [{'stage': 'analysis', 'event': 'failed', 'at': 1017,
+                                                    'error': {'category': 'local_or_validation'}}])
+        timeline = DemoTimeline(self.directory)
+        self.assertNotEqual(timeline.snapshot(12)['analysis']['schedule']['reason'], 'initial_translation', 'An earlier failed analysis has unknown admission time; never invent its ordering')
+
     def test_failed_generation_is_not_completion_and_preserves_reservation(self):
         self.continuous_fixture()
         state = json.loads((self.directory / 'state.json').read_text())

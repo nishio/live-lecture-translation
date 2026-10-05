@@ -442,7 +442,29 @@ class DemoTimeline:
         schedule['remaining_seconds'] = max(0, min(self.audio_seconds, boundary + interval) - capture_seconds)
         return status('waiting', 'recording')
 
-    def _schedule(self, kind, events, at, state, capture_seconds, diagnostics=None):
+    def _initial_translation_wait(self, at):
+        """Describe only a recorded startup order, never impose it on old runs."""
+        if (self.configuration.get('initial_translation_first') is not True
+                or not self.continuous or not self.analysis_events):
+            return False
+        first_analysis = min(self.analysis_events, key=lambda event: event['began_at'])
+        # Failed analyses have no recorded admission time. An earlier failure
+        # therefore cannot establish that analysis waited for translation.
+        if any(event['stage'] == 'analysis' and event['at'] < first_analysis['at'] for event in self.failures):
+            return False
+        outcomes = [(event['at'], event['began_at']) for event in self.translation_events]
+        outcomes.extend((event['at'], None) for event in self.failures if event['stage'] == 'translation')
+        if not outcomes:
+            return False
+        completed_at, began_at = min(outcomes, key=lambda item: item[0])
+        if first_analysis['began_at'] < completed_at or at >= completed_at:
+            return False
+        # Once a successful recorded request is admitted, the shared cloud-slot
+        # state below explains the wait. A preparation failure has no admission
+        # timestamp; retain a wait without manufacturing a request or ETA.
+        return began_at is None or at < began_at
+
+    def _schedule(self, kind, events, at, state, capture_seconds, diagnostics=None, *, initial_translation_pending=False):
         interval = self.configuration.get('chunk_seconds' if kind == 'asr' else kind + '_interval',
                                           15 if kind == 'asr' else 60 if kind == 'translation' else 120)
         if not numeric(interval) or interval <= 0:
@@ -466,6 +488,8 @@ class DemoTimeline:
                     'reason': 'no_pending' if not future else 'finalizing'}
         if kind == 'translation' and not self.continuous:
             return {**schedule, 'reason': 'disabled'}
+        if kind == 'analysis' and initial_translation_pending and self._initial_translation_wait(at):
+            return {**schedule, 'state': 'waiting', 'reason': 'initial_translation'}
         if future:
             other = self.analysis_events if kind == 'translation' else self.translation_events
             if any(event['began_at'] <= at < event['at'] for event in other):
@@ -552,7 +576,8 @@ class DemoTimeline:
                 'analysis': {'state': analysis_state, 'through_seconds': result['through_seconds'] if result else 0,
                              'generated_at': analyses[-1]['at'] if analyses else None, 'provider': self.final['analysis'].get('provider', 'openai'),
                              'model': self.model, 'error': analysis_error, 'result': result,
-                             'schedule': self._schedule('analysis', self.analysis_events, at, analysis_state, capture_seconds, analysis_diagnostics)},
+                             'schedule': self._schedule('analysis', self.analysis_events, at, analysis_state, capture_seconds, analysis_diagnostics,
+                                                       initial_translation_pending=bool(pending))},
                 'translation': {'enabled': self.continuous, 'state': translation_state if self.continuous else 'disabled',
                                 'blocks': blocks, 'covered_source_ids': [identity for block in blocks for identity in block['source_ids']],
                                 'through_seconds': max((block.get('end_seconds', 0) for block in blocks), default=0),

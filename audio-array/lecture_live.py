@@ -629,6 +629,18 @@ class LectureApp:
         else:
             wants = bool(newest) and not self._analysis_manual_required and (
                 newest != self._analysis_last_source_id or self._generation_offline[kind])
+            # At startup, understanding support should follow the first
+            # available translation. A boundary wait holds no cloud slot;
+            # an admitted attempt or preparation failure releases this gate.
+            translation = self.state['translation']
+            translation_recovery = self._recovery['translation']
+            if (wants and self._continuous_enabled() and translation['pending_lines']
+                    and not math.isfinite(self._generation_last_started['analysis'])
+                    and not math.isfinite(self._generation_last_started['translation'])
+                    and not translation['retry_required']
+                    and not translation_recovery['error']
+                    and not translation_recovery['paused'] and not translation_recovery['exhausted']):
+                return False, None, 'initial_translation'
         if not wants:
             return False, None, 'no_pending'
         offline = self._generation_offline[kind]
@@ -683,8 +695,8 @@ class LectureApp:
         if not wants:
             if self.state[kind]['state'] in {'failed', 'paused'} or recovery['paused'] or recovery['exhausted']:
                 return status('blocked', 'manual_retry')
-            if reason == 'continuation':
-                return status('waiting', 'continuation')
+            if reason in {'continuation', 'initial_translation'}:
+                return status('waiting', reason)
             return status('complete' if finished else 'idle', 'no_pending' if newest else 'no_source')
         if not self.audio_queue.empty():
             return status('busy', 'asr')
@@ -877,7 +889,7 @@ class LectureApp:
                                           provider=provider, model=model)
             self.state['translation'].update(enabled=self.continuous_translation and provider == 'openai',
                 state='waiting' if self.continuous_translation and provider == 'openai' else 'idle')
-            self._generation_last_started = {'analysis': -math.inf, 'translation': time.monotonic()}
+            self._generation_last_started = {'analysis': -math.inf, 'translation': -math.inf}
             self._generation_last_kind = None
             self._analysis_last_source_id = None
             self._analysis_manual_required = False
@@ -897,6 +909,7 @@ class LectureApp:
                     'provisional_refresh_seconds': self.provisional_refresh_seconds,
                     'provisional_window_seconds': self.provisional_window_seconds,
                     'continuous_translation': self.continuous_translation,
+                    'initial_translation_first': self._continuous_enabled(),
                     'translation_interval': self.translation_interval,
                     'translation_source_policy_version': SOURCE_POLICY_VERSION,
                     'translation_max_wait_seconds': TRANSLATION_MAX_WAIT_SECONDS,

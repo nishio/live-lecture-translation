@@ -103,6 +103,9 @@
     if (schedule.state === 'waiting' && schedule.reason === 'continuation') {
       return {state: 'waiting', label: '文の続き待ち', compact: '続き待ち', fraction: 0};
     }
+    if (schedule.reason === 'initial_translation') {
+      return {state: 'waiting', label: '最初の日本語訳を優先しています', compact: '最初の訳待ち', fraction: 0};
+    }
     const audioClock = schedule.clock === 'audio' || kind === 'asr';
     const remaining = number(schedule.remaining_seconds) ? Math.max(0, schedule.remaining_seconds - (audioClock ? 0 : Math.max(0, elapsed))) : null;
     const total = number(schedule.wait_seconds) ? schedule.wait_seconds : schedule.interval_seconds;
@@ -571,6 +574,7 @@
       renderAgenda();
       renderControls();
       renderTranslationStatus(fresh);
+      renderEmptyTranslationStatus(fresh);
       renderSchedules(fresh);
       renderProcessingOverview(fresh, captureView);
     }
@@ -652,6 +656,8 @@
             : (view.state === 'busy' ? '新しい処理は始めません。すでに開始した処理の終了時刻は未定です。' : '未処理分を残したまま、新しい処理と再試行を止めています。'))
           : kind === 'asr'
           ? `円は原文を更新する次の音声区間${number(schedule?.interval_seconds) && schedule.interval_seconds > 0 ? `（${schedule.interval_seconds}秒ごと）` : ''}を受け付けるまでの目安です。受信済みの音声時間をもとに更新し、文字起こしの完了時刻を予測するものではありません。`
+          : schedule?.reason === 'initial_translation'
+            ? '最初の訳を作成してから、要点の整理を始めます。'
           : (view.state === 'waiting' && schedule?.reason === 'continuation'
             ? '文の区切りを待っています。開始時刻は未定です。'
             : '円は次の処理を開始できるまでの目安です。生成完了までの時間ではありません。');
@@ -689,6 +695,21 @@
       $('translation-retry-button').disabled = stopRequested() || translationRetryBusy || !fresh;
       put('translation-retry-button', translationRetryBusy ? '翻訳の再試行を要求中…' : '翻訳を再試行');
       showText('translation-error', enabled ? text(translation.error) : '');
+    }
+
+    function renderEmptyTranslationStatus(fresh) {
+      const next = displayedState;
+      if (next?.translation?.enabled !== true || $('translation-empty').hidden) return;
+      let hint = '最初の日本語訳の開始を待っています。';
+      if (historySelection || frozen) hint = 'この時点に公開済みの訳はありません。';
+      else if (!fresh) hint = '翻訳の状態を確認できません。接続の回復を待っています。';
+      else if (stopRequested()) hint = '翻訳の停止を要求しました。公開済みの訳はありません。';
+      else if (state.translation.state === 'failed') hint = '翻訳に失敗しました。処理の状態を確認してください。';
+      else if (state.translation.state === 'running') hint = '最初の日本語訳を作成しています。';
+      else if (state.translation.state === 'completed' && state.translation.pending_lines === 0) hint = 'この時点に翻訳対象の原文はありません。';
+      else if (state.translation.schedule?.reason === 'continuation') hint = '翻訳する文の区切りを待っています。';
+      else if (!array(next.lines).length) hint = '翻訳する原文を待っています。';
+      put('translation-empty', hint);
     }
 
     function renderPreflight(fresh, current) {
@@ -787,6 +808,7 @@
       put('translation-heading', '文脈付きの日本語訳');
       put('translation-empty', historySelection ? 'この時点に対応する公開済みの訳はありません。' : '原文のまとまりから順に訳を追加します。');
       $('translation-empty').hidden = blocks.length > 0;
+      renderEmptyTranslationStatus(isFresh(state, connected, now()));
       const signature = JSON.stringify([next.session?.id, blocks]);
       if (translationMode === 'continuous' && signature === renderedTranslationSignature) return;
       const panel = $('translation-blocks');

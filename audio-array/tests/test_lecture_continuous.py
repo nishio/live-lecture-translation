@@ -120,6 +120,26 @@ class ContinuousTest(unittest.TestCase):
         self.assertTrue(all(row['published_at'] >= row['started_at'] for row in translations))
         self.assertFalse(state['processing_active'])
 
+    def test_first_ready_translation_precedes_analysis_without_initial_interval_wait(self):
+        order, first_source_active = [], []
+        def translate(plan, **options):
+            if not order:
+                first_source_active.append(not app.source_done.is_set())
+            order.append('translation')
+            return fake_translation(plan, **options)
+        def analyze(*args, **options):
+            self.assertTrue(app.state['translation']['blocks'])
+            order.append('analysis')
+            return fake_analysis(*args, **options)
+        app = self.app(translator=translate, analyzer=analyze)
+        app.start({'provider': 'openai'}, replay=self.wave(4), pace=1)
+        self.wait(app)
+        self.assertEqual(['translation', 'analysis'], order[:2])
+        self.assertEqual([True], first_source_active)
+        self.assertEqual(0, app.snapshot()['translation']['pending_lines'])
+        manifest = json.loads((app.result_dir / 'runtime-manifest.json').read_text())
+        self.assertTrue(manifest['configuration']['initial_translation_first'])
+
     def test_blocked_translation_does_not_block_asr_and_final_drain_preserves_blocks(self):
         entered, release = threading.Event(), threading.Event()
         self.addCleanup(release.set)
@@ -170,12 +190,17 @@ class ContinuousTest(unittest.TestCase):
 
     def test_cloud_failure_preserves_pending_and_requires_explicit_translation_retry(self):
         attempts = []
+        def transcribe(chunk, *args):
+            # This fixture tests one failed final request and its exact retry.
+            # Live startup prefixes and later fresh batches are tested separately.
+            self.assertTrue(app.source_done.wait(3))
+            return fake_uncertain_asr(chunk, *args)
         def translate(plan, **options):
             attempts.append((deepcopy(plan), options['retry_failed']))
             if not options['retry_failed']:
                 raise RuntimeError('synthetic API outcome unknown')
             return fake_translation(plan, **options)
-        app = self.app(translator=translate, transcriber=fake_uncertain_asr)
+        app = self.app(translator=translate, transcriber=transcribe)
         app.start({'provider': 'openai'}, replay=self.audio, pace=0)
         self.wait(app)
         state = app.snapshot()
@@ -592,9 +617,10 @@ class ContinuousTest(unittest.TestCase):
         health = {'checks': [{'id': 'network', 'reachable': True}]}
         readiness = Mock()
         readiness.snapshot.side_effect = lambda: health
-        attempts = []
+        attempts, attempt_budgets = [], []
         def translate(plan, **options):
             attempts.append((deepcopy(plan), options['retry_failed']))
+            attempt_budgets.append(app._recovery['translation']['attempts'])
             if len(attempts) == 1:
                 health['checks'][0]['reachable'] = False
                 raise CloudError('通信失敗', category='transport', retryable=True)
@@ -607,9 +633,14 @@ class ContinuousTest(unittest.TestCase):
             self.assertEqual(0, app.snapshot()['translation']['schedule']['retry']['attempts'])
             health['checks'][0]['reachable'] = True
             self.wait(app)
-        self.assertEqual([False, True], [retry for _, retry in attempts])
+        self.assertEqual([False, True], [retry for _, retry in attempts[:2]])
+        self.assertFalse(any(retry for _, retry in attempts[2:]),
+                         'Source arriving after the initial request gets a fresh final batch')
         self.assertEqual(attempts[0][0], attempts[1][0])
-        self.assertEqual(1, app.snapshot()['translation']['schedule']['retry']['attempts'])
+        self.assertEqual([0, 1], attempt_budgets[:2])
+        self.assertTrue(all(value == 0 for value in attempt_budgets[2:]))
+        covered = [identity for block in app.snapshot()['translation']['blocks'] for identity in block['source_ids']]
+        self.assertEqual([row['id'] for row in app.state['lines']], covered)
 
     def test_retry_window_expires_while_waiting_without_resending(self):
         from event_insights_cloud import CloudError
@@ -671,6 +702,106 @@ class ContinuousTest(unittest.TestCase):
         app._analysis_last_source_id = 'c000000-l0000'
         app._generation_last_started['translation'] = time.monotonic() - 61
         return app
+
+    def startup_app(self, text='A finished sentence.', through=3):
+        app = self.boundary_app(text=text, through=through)
+        app.state['analysis'].update(provider='openai', state='waiting')
+        app._analysis_last_source_id = None
+        app._generation_last_started = {'analysis': -float('inf'), 'translation': -float('inf')}
+        return app
+
+    def test_startup_schedule_translation_due_analysis_waits_then_normal_cadence(self):
+        app = self.startup_app()
+        state = app.snapshot()
+        self.assertEqual('due', state['translation']['schedule']['state'])
+        self.assertEqual(('waiting', 'initial_translation', None),
+            tuple(state['analysis']['schedule'][key] for key in ('state', 'reason', 'remaining_seconds')))
+        with patch.object(app, '_start_cloud_job') as start:
+            app._continuous_step(False, 'c000000-l0000')
+            self.assertEqual('translation', start.call_args.args[0])
+            self.assertEqual('due', app.snapshot()['analysis']['schedule']['state'])
+            self.assertGreater(app.snapshot()['translation']['schedule']['remaining_seconds'], 59)
+            app._continuous_step(False, 'c000000-l0000')
+            self.assertEqual(['translation', 'analysis'], [call.args[0] for call in start.call_args_list])
+
+    def test_initial_boundary_wait_releases_at_existing_processed_audio_timeout(self):
+        app = self.startup_app(text='The result depends on', through=1)
+        state = app.snapshot()
+        self.assertEqual('continuation', state['translation']['schedule']['reason'])
+        self.assertEqual('initial_translation', state['analysis']['schedule']['reason'])
+        with patch.object(app, '_start_cloud_job') as start:
+            self.assertFalse(app._continuous_step(False, 'c000000-l0000'))
+            start.assert_not_called()
+            self.assertEqual(-float('inf'), app._generation_last_started['translation'])
+            app.state['asr']['through_seconds'] = 31
+            app._continuous_step(False, 'c000000-l0000')
+            self.assertEqual('translation', start.call_args.args[0])
+            self.assertEqual('timeout', start.call_args.args[1]['plan']['selection']['group_boundaries'][0]['reason'])
+            app._continuous_step(False, 'c000000-l0000')
+            self.assertEqual('analysis', start.call_args.args[0])
+
+    def test_native_or_no_eligible_initial_source_does_not_block_analysis_or_finish(self):
+        app = self.startup_app()
+        app.state['lines'][0].update(language='ja', text='合成の日本語の発言です。')
+        self.assertEqual('due', app.snapshot()['analysis']['schedule']['state'])
+        with patch.object(app, '_start_cloud_job') as start:
+            app._continuous_step(False, 'c000000-l0000')
+            self.assertEqual('analysis', start.call_args.args[0])
+        app = self.startup_app(text='um')
+        app.state['lines'][0]['uncertain'] = True
+        with patch.object(app, '_start_cloud_job') as start:
+            self.assertFalse(app._continuous_step(True, None))
+            start.assert_not_called()
+        self.assertEqual(0, app.snapshot()['translation']['pending_lines'])
+
+    def test_initial_translation_preparation_failure_releases_analysis(self):
+        app = self.startup_app()
+        with patch.object(app, '_prepare_translation', side_effect=ValueError('synthetic invalid plan')), \
+                patch.object(app, '_start_cloud_job') as start:
+            app._continuous_step(False, 'c000000-l0000')
+            start.assert_not_called()
+            self.assertEqual('failed', app.state['translation']['state'])
+            self.assertEqual(1, app.snapshot()['translation']['pending_lines'])
+            self.assertEqual('due', app.snapshot()['analysis']['schedule']['state'])
+            app._continuous_step(False, 'c000000-l0000')
+            self.assertEqual('analysis', start.call_args.args[0])
+
+    def test_first_translation_retry_wait_does_not_starve_analysis(self):
+        from event_insights_cloud import CloudError
+        order = []
+        def translate(*args, **options):
+            order.append('translation')
+            raise CloudError('synthetic retry wait', category='rate_limit', retryable=True,
+                             http_status=429, retry_after_seconds=15)
+        def analyze(*args, **options):
+            order.append('analysis')
+            return fake_analysis(*args, **options)
+        app = self.app(translator=translate, analyzer=analyze)
+        app.start({'provider': 'openai'}, replay=self.audio, pace=0)
+        self.until(lambda: 'analysis' in order)
+        self.assertEqual(['translation', 'analysis'], order[:2])
+        self.assertGreater(app.snapshot()['translation']['schedule']['retry']['remaining_seconds'], 10)
+        app.pause_retries('translation')
+        self.wait(app)
+        self.assertEqual(1, order.count('translation'))
+        self.assertEqual(3, app.snapshot()['translation']['pending_lines'])
+
+    def test_manual_analysis_can_bypass_initial_boundary_wait_but_stop_cannot(self):
+        app = self.startup_app(text='The result depends on', through=1)
+        app.retry_event.set()
+        with patch.object(app, '_start_cloud_job') as start:
+            app._continuous_step(False, 'c000000-l0000')
+            self.assertEqual('analysis', start.call_args.args[0])
+        app = self.startup_app()
+        app.stop()
+        app.retry_event.set()
+        app.translation_retry_event.set()
+        with patch.object(app, '_start_cloud_job') as start:
+            self.assertFalse(app._continuous_step(False, 'c000000-l0000'))
+            start.assert_not_called()
+        state = app.snapshot()
+        for kind in ('translation', 'analysis'):
+            self.assertEqual('stopped', state[kind]['schedule']['reason'])
 
     def test_continuation_wait_neither_calls_cloud_nor_consumes_cadence(self):
         app = self.boundary_app()

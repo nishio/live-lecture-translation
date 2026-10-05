@@ -73,7 +73,8 @@ async function run() {
     .filter(([, , declarations]) => /\bdisplay\s*:\s*none\b/.test(declarations))
     .flatMap(([, selectors]) => selectors.split(',').map(selector => selector.trim()));
   assert.equal(hiddenSelectors.some(selector => /\.transcript-empty\b/.test(selector)), false, 'The actual replay CSS must keep first-source waiting/recognition/failure status visible');
-  for (const selector of ['.lecture-demo #translation-empty', '.lecture-demo #headline.empty', '.lecture-demo #summary-empty', '.lecture-demo #concepts-empty']) {
+  assert.equal(hiddenSelectors.includes('.lecture-demo #translation-empty'), false, 'The initial translation wait must remain visible in the real replay CSS');
+  for (const selector of ['.lecture-demo #headline.empty', '.lecture-demo #summary-empty', '.lecture-demo #concepts-empty']) {
     assert(hiddenSelectors.includes(selector), `Other empty reading areas remain quiet: ${selector}`);
   }
   assert.match(html, /id="demo-slider"[^>]*step="any"/, 'The native range must not round its maximum below the final publication');

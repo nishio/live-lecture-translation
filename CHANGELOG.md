@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Start the first ready continuous translation before automatic analysis, without waiting the normal 60-second translation interval. Retain failure/retry and no-target exceptions, later scheduling, and historical publication times; show the first translation's waiting state in the player.
 - Prepare local speech recognition before microphone/replay audio starts, reuse the initialized model, and show preparation, cancellation and retry separately. Preserve preparation duration and actual text publication times. Check first nonempty text and sustained updates in fresh-process saved-audio trials instead of accepting a long initial blank as expected behavior.
 
 - Put the latest revisable recognition in the main original-text flow and use its three-second schedule for the primary indicator. Keep overlapping earlier recognition intact under 「前の認識を見る」, preserving canonical source IDs and translation input. Reuse saved publication times without new generation.

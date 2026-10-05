@@ -1,5 +1,5 @@
 .lecture-demo .setup,.lecture-demo #processing-details,.lecture-demo #retry-button,.lecture-demo #translation-retry-button,.lecture-demo #translation-pause-retries,.lecture-demo #analysis-pause-retries{display:none!important}
-.lecture-demo #translation-empty,.lecture-demo #headline.empty,.lecture-demo #summary-empty,.lecture-demo #concepts-empty{display:none!important}
+.lecture-demo #headline.empty,.lecture-demo #summary-empty,.lecture-demo #concepts-empty{display:none!important}
 .lecture-demo .page-header{order:-1;padding:6px 0}.lecture-demo .page-header h1{font-size:17px}
 .demo-toolbar{flex:0 0 auto;width:min(1320px,calc(100% - 32px));margin:0 auto 4px;padding:8px 12px;border:1px solid #abc4b9;border-radius:9px;background:#e9f1e9;color:var(--ink)}
 .demo-controls{display:flex;align-items:center;gap:10px}

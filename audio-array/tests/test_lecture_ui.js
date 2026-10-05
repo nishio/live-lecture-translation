@@ -346,6 +346,34 @@ async function run() {
   const emptyReplay = appFixture(); emptyReplay.app.acceptState(snapshot({session: {id: 'demo-zero', source_kind: 'replay'}, capture: {state: 'completed', audio_seconds: 0}}));
   assert.equal(emptyReplay.$('translation-heading').textContent, '文脈付きの日本語訳', 'Replay at 0:00 has the same honest pending state');
   assert.equal(emptyReplay.$('translation-blocks').children.length, 0);
+  const firstTranslation = appFixture();
+  const translationStartup = snapshot({session: {id: 'translation-first', source_kind: 'replay'},
+    translation: {enabled: true, state: 'waiting', blocks: [], schedule: {state: 'idle', reason: 'no_source'}},
+    analysis: {provider: 'openai', schedule: {state: 'waiting', reason: 'initial_translation'}}});
+  firstTranslation.app.acceptState(translationStartup);
+  assert.equal(firstTranslation.$('translation-empty').hidden, false);
+  assert.match(firstTranslation.$('translation-empty').textContent, /原文を待っています/);
+  assert.equal(firstTranslation.$('analysis-schedule-compact').textContent, '最初の訳待ち');
+  assert.doesNotMatch(firstTranslation.$('analysis-schedule-text').textContent, /\d+秒/);
+  translationStartup.lines = [{id: 'first', text: 'A complete sentence.', language: 'en', start_seconds: 0, end_seconds: 7}];
+  translationStartup.translation.state = 'running';
+  firstTranslation.app.acceptState(structuredClone(translationStartup));
+  assert.match(firstTranslation.$('translation-empty').textContent, /日本語訳を作成/);
+  firstTranslation.app.goLive();
+  assert.match(firstTranslation.$('translation-empty').textContent, /日本語訳を作成/, 'The player forces a live redraw after seek; retain the actual generation status');
+  translationStartup.translation.state = 'waiting';
+  translationStartup.translation.schedule = {state: 'waiting', reason: 'continuation'};
+  firstTranslation.app.acceptState(structuredClone(translationStartup));
+  assert.match(firstTranslation.$('translation-empty').textContent, /文の区切り/);
+  firstTranslation.app.freeze();
+  translationStartup.translation.blocks = [{id: 'translated', source_ids: ['first'], text: '保存された訳', published_at: 1000}];
+  translationStartup.translation.state = 'completed';
+  firstTranslation.app.acceptState(structuredClone(translationStartup));
+  assert.match(firstTranslation.$('translation-empty').textContent, /この時点/);
+  assert.equal(firstTranslation.$('translation-blocks').children.length, 0, 'Holding an empty translation view does not reveal future output');
+  firstTranslation.app.goLive();
+  assert.equal(firstTranslation.$('translation-empty').hidden, true);
+  assert.match(firstTranslation.$('translation-blocks').textContent, /保存された訳/);
   first.state(snapshot({session: {id: 's1', source_kind: 'microphone'}, capture: {state: 'recording', audio_seconds: 20, last_audio_at: 999, rms_dbfs: -22}, asr: {state: 'running', through_seconds: 10, queue_seconds: 10}}));
   await first.app.poll(); assert.equal(first.$('capture-state').textContent, '録音中');
   assert.equal(first.$('start-button').disabled, true); assert.equal(first.$('stop-button').disabled, false);
