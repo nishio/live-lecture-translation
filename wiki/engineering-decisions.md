@@ -26,6 +26,13 @@ Measure the boundaries that answer the question: chunk completion to recognition
 
 Likewise, keep structural validity, source coverage, semantic fidelity, capture integrity, cost, and duration endurance separate. A result can succeed in one and fail in another. Model agreement is not ground truth; rapid partial text is not proof of a correct final transcript.
 
+An exact source-ID list does not prove that the generated text belongs to those
+IDs. In the [Luna trial](subscription-provider-experiment.md#luna-model-comparison),
+a structurally accepted response moved meaning into a different source block
+and omitted another clause. Review text-to-source fidelity as well as ID coverage
+before adopting a faster provider. A quick rejected or incomplete response is
+not an equivalent successful result.
+
 ## 4. Recover and match evidence before comparing providers
 
 Inspect saved per-call results and publication measurements before declaring

@@ -1,5 +1,21 @@
 # Wiki log
 
+## [2026-10-05] file back | Do not adopt unchanged Luna configuration
+
+Recorded the user's assessment that the Luna result is not a compelling
+replacement and the scoped adoption decision: preserve the speed evidence,
+but do not promote the tested Luna/low configuration with unchanged prompts
+into the live lecture path. One translation was rejected, and other results
+passed structural checks while losing content or misattributing source evidence.
+Added the reusable rule that exact ID coverage does not prove text-to-source
+fidelity. A future candidate needs both forms of validation before speed can
+justify adoption; this is not a blanket rejection of Luna or subscription use.
+
+Updated the experiment decision, topic, engineering lessons, index and log in
+the isolated worktree. Markdown remains authoritative. No application code,
+live settings or main checkout changed, and no new inference was performed.
+Private recordings, source text, generated outputs and runtime state stay ignored.
+
 ## [2026-10-05] experiment | Audrey with Luna low
 
 At the user's request, evaluated `gpt-6-luna` with the same frozen nine

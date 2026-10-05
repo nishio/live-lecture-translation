@@ -143,3 +143,17 @@ these passed the existing validator. Keep structural compliance and semantic
 fidelity as separate acceptance criteria, and never treat a rejected short
 response as faster successful completion. Future prompt/schema experiments
 must preserve this baseline and its failure evidence. No live model was switched.
+
+### Adoption decision
+
+Do not recommend the current `gpt-6-luna` / low Codex path as an equivalent
+replacement for this lecture workflow. The observed speed gain does not justify
+the rejected translation and semantic/source-reference errors with unchanged
+prompts. Keep the live provider selection unchanged. This conclusion is scoped
+to the tested configuration and source, not a claim that Luna is unsuitable
+for every task or that all subscription integration should be abandoned.
+
+Reconsider a changed configuration only after it demonstrates both complete
+target/group preservation and faithful meaning-to-source attribution on the
+known failure cases. Record its speed separately from rejected/incomplete work.
+No follow-up generation or rollout is implied by preserving this decision.

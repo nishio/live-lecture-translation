@@ -2,7 +2,7 @@
 
 This wiki preserves reusable engineering decisions for `live-lecture-translation`. Markdown is the editing authority. Keep source audio, recognized speech, generated lecture content, keys, and machine-specific private data outside the wiki.
 
-- [Subscription provider experiment](subscription-provider-experiment.md): isolated v0.9.0-based Codex trials, completed Audrey Sol replay, historical API timings, and faster Luna responses with one rejected translation and semantic/source-reference failures; separate usage evidence and remaining live-integration work.
+- [Subscription provider experiment](subscription-provider-experiment.md): isolated v0.9.0-based Codex trials, Audrey Sol/API timings, and faster Luna responses with structural and semantic failures; current decision against adopting the unchanged Luna configuration, separate usage evidence, and remaining live-integration work.
 - [Engineering decisions](engineering-decisions.md): independent evidence capture, persistent unfinished work, recovering per-call measurements, matching provider comparisons, separating observed latency from causal explanations, and their operational consequences.
 - [Architecture](../docs/architecture.md): current components and lifecycle.
 - [Historical experiments](../docs/experiments/README.md): measured values, conditions, estimates, and limits without source content.

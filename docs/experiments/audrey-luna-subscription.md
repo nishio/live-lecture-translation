@@ -126,6 +126,13 @@ evaluated separately for both structural compliance and semantic fidelity.
 The current trial did not alter prompts, validators, production model selection
 or the live application to hide its failures.
 
+**Adoption decision (2026-10-05):** the unchanged Luna/low configuration is not
+recommended for replacing the current lecture path. The user agreed that the
+result was not compelling. Keep live selection unchanged; a future candidate
+must pass the known coverage and meaning-to-source failures before its speed
+gain supports adoption. This is specific to the tested configuration, not a
+general rejection of Luna or subscription access.
+
 ## Validation of the record
 
 No application code changed. Source digest and all nine request hashes were
