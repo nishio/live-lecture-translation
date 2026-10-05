@@ -933,7 +933,6 @@
         const rawSignature = JSON.stringify(group.lines.map(source => [source.id, source.text, source.start_seconds, source.end_seconds, source.language, source.uncertain]));
         row.tabIndex = -1; row.dataset.sourceId = id;
         row.dataset.sourceIds = JSON.stringify(sourceIds);
-        row.classList.toggle('latest-source', !hasTail && sourceIds.includes(latestId));
         row.setAttribute('aria-current', !hasTail && sourceIds.includes(latestId) ? 'true' : 'false');
         if (row.dataset.rawSignature !== rawSignature) {
           row.dataset.rawSignature = rawSignature;

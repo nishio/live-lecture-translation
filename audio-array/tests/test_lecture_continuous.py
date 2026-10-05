@@ -501,9 +501,10 @@ class ContinuousTest(unittest.TestCase):
 
     def test_transient_failures_recover_same_frozen_input_without_losing_source(self):
         from event_insights_cloud import CloudError
-        attempts, analyses = [], []
+        attempts, attempt_budgets, analyses = [], [], []
         def translate(plan, **options):
             attempts.append((deepcopy(plan), options['retry_failed']))
+            attempt_budgets.append(app._recovery['translation']['attempts'])
             if len(attempts) == 1:
                 raise CloudError('通信失敗', category='transport', retryable=True)
             return fake_translation(plan, **options)
@@ -517,13 +518,22 @@ class ContinuousTest(unittest.TestCase):
             app.start({'provider': 'openai'}, replay=self.audio, pace=0)
             self.wait(app)
         state = app.snapshot()
-        self.assertEqual([False, True], [manual for _, manual in attempts])
+        self.assertEqual([False, True], [retry for _, retry in attempts[:2]])
+        self.assertFalse(any(retry for _, retry in attempts[2:]),
+                         'Source arriving after the initial request gets a fresh final batch')
         self.assertEqual([False, True], analyses[:2])
         self.assertFalse(any(analyses[2:]), 'Newer source may get a fresh final analysis after the frozen retry')
         self.assertEqual(attempts[0][0], attempts[1][0])
+        self.assertEqual([0, 1], attempt_budgets[:2])
+        self.assertTrue(all(value == 0 for value in attempt_budgets[2:]))
+        expected = [row['id'] for row in state['lines']]
+        successful = [identity for plan, _ in attempts[1:] for identity in plan['target_source_ids']]
+        covered = [identity for block in state['translation']['blocks'] for identity in block['source_ids']]
+        self.assertEqual(expected, successful)
+        self.assertEqual(expected, covered)
         self.assertEqual(0, state['translation']['pending_lines'])
         self.assertEqual('complete', state['translation']['schedule']['state'])
-        self.assertEqual(1, state['translation']['schedule']['retry']['attempts'])
+        self.assertEqual(attempt_budgets[-1], state['translation']['schedule']['retry']['attempts'])
         self.assertEqual('completed', state['asr']['state'])
         events = [json.loads(row) for row in (app.result_dir / 'generation-events.jsonl').read_text().splitlines()]
         self.assertEqual({'analysis', 'translation'}, {event['stage'] for event in events})

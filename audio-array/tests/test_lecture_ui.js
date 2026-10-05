@@ -559,13 +559,12 @@ async function run() {
   rich.app.acceptState(newer);
   assert.equal(rich.$('headline').textContent, injected, 'Reading freeze keeps text stable');
   assert.equal(rich.$('capture-time').textContent, '0:40', 'Reading freeze never freezes capture status');
-  assert.equal(sourceLine.classes.has('latest-source'), true, 'Frozen reading retains the latest marker for its displayed snapshot');
+  assert.equal(sourceLine.attributes['aria-current'], 'true', 'Frozen reading retains the latest marker for its displayed snapshot');
   rich.app.goLive(); assert.equal(rich.$('headline').textContent, '新論点'); assert.equal(rich.$('transcript').children.length, 2);
-  assert.equal(sourceLine.classes.has('latest-source'), false, 'A new utterance clears the previous latest marker');
-  assert.equal(rich.$('transcript').children[1].classes.has('latest-source'), true);
-  assert.equal(sourceLine.attributes['aria-current'], 'false');
+  assert.equal(sourceLine.attributes['aria-current'], 'false', 'A new utterance clears the previous latest marker');
+  assert.equal(rich.$('transcript').children[1].attributes['aria-current'], 'true');
   rich.app.acceptState(richState);
-  assert.equal(rich.$('transcript').children[0].classes.has('latest-source'), true, 'Rewind restores the latest utterance for that point');
+  assert.equal(rich.$('transcript').children[0].attributes['aria-current'], 'true', 'Rewind restores the latest utterance for that point');
   rich.app.acceptState(newer);
   assert.equal(rich.$('summary-heading').textContent, '直近の要点');
 
@@ -715,8 +714,7 @@ async function run() {
   assert.equal(uncertainRow.dataset.sourceId, 'u1', 'The first source ID remains the representative');
   assert.deepEqual(JSON.parse(uncertainRow.dataset.sourceIds), ['u1', 'u2'], 'Every repeated source ID remains attached to the displayed row');
   assert.equal(uncertainRow.classes.has('uncertain-source'), true);
-  assert.equal(uncertainRow.classes.has('latest-source'), true, 'The group stays latest when the last incoming line is a duplicate');
-  assert.equal(uncertainRow.attributes['aria-current'], 'true');
+  assert.equal(uncertainRow.attributes['aria-current'], 'true', 'The group stays latest when the last incoming line is a duplicate');
   assert.equal(uncertain.dom.activeElement, uncertainRow, 'Grouping does not move focus');
   assert.equal(uncertain.$('transcript').scrollTop, 100, 'A duplicate arrival does not pull a reader away from earlier text');
   assert.equal(JSON.stringify(duplicateState), duplicateEvidence, 'Display grouping never modifies source evidence or its IDs');
@@ -734,13 +732,12 @@ async function run() {
     lines: [...thirdState.lines, uncertainLine('u4', 'A different statement.', {start_seconds: 15, end_seconds: 20})]};
   uncertain.app.acceptState(differentState);
   assert.equal(uncertain.$('transcript').children.length, 2);
-  assert.equal(uncertainRow.classes.has('latest-source'), false);
   assert.equal(uncertainRow.attributes['aria-current'], 'false');
-  assert.equal(uncertain.$('transcript').children[1].classes.has('latest-source'), true);
+  assert.equal(uncertain.$('transcript').children[1].attributes['aria-current'], 'true');
   uncertain.app.acceptState(duplicateState);
   assert.equal(uncertain.$('transcript').children.length, 1, 'Rewinding removes later nonduplicate rows');
   assert.deepEqual(JSON.parse(uncertain.$('transcript').children[0].dataset.sourceIds), ['u1', 'u2'], 'Rewinding removes future member IDs from a group');
-  assert.equal(uncertain.$('transcript').children[0].classes.has('latest-source'), true);
+  assert.equal(uncertain.$('transcript').children[0].attributes['aria-current'], 'true');
   uncertain.app.acceptState(uncertainState);
   assert.deepEqual(JSON.parse(uncertain.$('transcript').children[0].dataset.sourceIds), ['u1'], 'Rewinding before the repetition restores a single-source row');
   assert.equal(JSON.stringify(duplicateState), duplicateEvidence, 'Freeze and rewind leave the received evidence unchanged');
