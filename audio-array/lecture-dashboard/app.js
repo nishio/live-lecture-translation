@@ -193,10 +193,9 @@
     // These nodes move into the one transcript scroller when needed. Keep
     // references while detached; they are never a second reading pane.
     const previewNodes = new Map(['provisional-region', 'provisional-heading', 'provisional-help', 'provisional-error',
-      'provisional-lines', 'provisional-history', 'provisional-history-summary', 'provisional-history-lines'].map(id => [id, $(id)]));
+      'provisional-lines'].map(id => [id, $(id)]));
     const previewNode = id => previewNodes.get(id);
     previewNode('provisional-region').replaceChildren(...['provisional-heading', 'provisional-help', 'provisional-error', 'provisional-lines'].map(previewNode));
-    previewNode('provisional-history').replaceChildren(previewNode('provisional-history-summary'), previewNode('provisional-history-lines'));
     let renderedTranslationSignature = '';
     let translationElements = new Map();
     let translationSession = null;
@@ -911,7 +910,10 @@
       const provisional = provisionalView(next);
       const signature = JSON.stringify([next.session?.id, lines.map(line => [line.id, line.text, line.start_seconds, line.end_seconds, line.language, line.uncertain]),
         provisionalSignature(provisional.preview), provisional.lines, !!historySelection]);
-      if (signature === renderedTranscriptSignature) return;
+      if (signature === renderedTranscriptSignature) {
+        if (forceLatest) $('transcript').scrollTop = $('transcript').scrollHeight;
+        return;
+      }
       renderedTranscriptSignature = signature;
       const transcript = $('transcript');
       const scrollTop = transcript.scrollTop;
@@ -920,9 +922,7 @@
       const focusedId = oldIds.find(id => lineElements.get(id) === doc.activeElement);
       const nextElements = new Map();
       const rows = [];
-      const overlappingRows = [];
-      const windowStart = provisional.preview?.window_start_seconds;
-      const hasTail = provisional.lines.length > 0 && number(windowStart);
+      const hasTail = provisional.lines.length > 0;
       const latestId = text(lines[lines.length - 1]?.id);
       const groups = transcriptDisplayGroups(lines);
       for (const group of groups) {
@@ -942,16 +942,10 @@
           row.replaceChildren(element('p', 'line-original', text(line.text)));
         }
         nextElements.set(id, row);
-        // Keep a boundary-crossing row whole and available. Segment times do
-        // not provide word alignment, so never trim words or silently drop it.
-        if (hasTail && !group.lines.every(source => number(source.end_seconds) && source.end_seconds <= windowStart)) overlappingRows.push(row);
-        else rows.push(row);
+        // Keep every saved row in the same scroller, including speech that
+        // overlaps the revisable tail. Never hide or trim text being read.
+        rows.push(row);
       }
-      const overlap = previewNode('provisional-history');
-      if (previousSession !== next.session?.id) overlap.open = false;
-      overlap.hidden = !overlappingRows.length;
-      reconcileRows(previewNode('provisional-history-lines'), overlappingRows);
-      if (overlappingRows.length) rows.push(overlap);
       renderProvisional(next, provisional);
       if (!previewNode('provisional-region').hidden) rows.push(previewNode('provisional-region'));
       transcriptEmptyElement = !rows.length ? element('p', 'transcript-empty', 'まだ原文はありません') : null;
@@ -960,7 +954,6 @@
       lineElements = nextElements;
       const focusedGroup = focusedId && groups.find(group => group.lines.some(line => text(line.id) === focusedId));
       const focusedRow = focusedGroup && lineElements.get(text(focusedGroup.lines[0].id));
-      if (focusedRow && overlap.contains(focusedRow)) overlap.open = true;
       transcript.scrollTop = forceLatest || previousSession !== next.session?.id || nearBottom ? transcript.scrollHeight : scrollTop;
       if (focusedRow && doc.activeElement !== focusedRow) focusedRow.focus({preventScroll: true});
       renderEmptyTranscriptStatus(isFresh(state, connected, now()));

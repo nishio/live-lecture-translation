@@ -217,11 +217,9 @@ async function run() {
     schedule: {state: 'waiting', reason: 'recording', clock: 'audio', interval_seconds: 3, remaining_seconds: 3}};
   const evidenceBeforeDisplay = JSON.stringify(tailState);
   flow.app.acceptState(tailState);
-  assert.deepEqual(flow.$('transcript').children, [originalRows[0], flow.$('provisional-history'), flow.$('provisional-region')]);
-  assert.equal(flow.$('provisional-history').open, false, 'Overlapping recognitions do not both appear as contiguous speech');
-  assert.deepEqual(flow.$('provisional-history-lines').children, originalRows.slice(1));
-  assert.equal(flow.$('provisional-history-lines').children[0].textContent, canonicalRows[1].text, 'A straddling source row remains whole and explicitly available');
-  assert.equal(flow.$('provisional-history-lines').children[0].dataset.sourceId, 'crossing');
+  assert.deepEqual(flow.$('transcript').children, [...originalRows, flow.$('provisional-region')], 'All saved recognition stays directly in the reading scroller, including overlapping speech');
+  assert.equal(originalRows[1].textContent, canonicalRows[1].text, 'A straddling source row remains whole');
+  assert.equal(originalRows[1].dataset.sourceId, 'crossing');
   assert.equal(flow.$('provisional-lines').textContent, 'A newly revised live tail.');
   assert.equal(flow.$('transcript').scrollTop, 100, 'The single reading scroller retains an earlier reading position');
   assert.equal(JSON.stringify(tailState), evidenceBeforeDisplay, 'Display reconciliation never edits recognition evidence');
@@ -246,22 +244,23 @@ async function run() {
   assert.equal(flow.$('asr-schedule-compact').textContent, '停止');
   const emptyPreview = structuredClone(tailState); emptyPreview.provisional_asr.lines = [];
   flow.app.acceptState(emptyPreview);
-  assert.deepEqual(flow.$('transcript').children, originalRows, 'An empty preview restores all canonical rows instead of hiding them');
+  assert.deepEqual(flow.$('transcript').children, originalRows, 'An empty preview leaves all canonical rows in place');
   originalRows[1].focus();
   flow.app.acceptState(tailState);
-  assert.equal(flow.$('provisional-history').open, true, 'A focused source remains accessible when it moves into the disclosure');
+  assert.deepEqual(flow.$('transcript').children, [...originalRows, flow.$('provisional-region')]);
   assert.equal(flow.dom.activeElement, originalRows[1]);
   const advancedTail = structuredClone(tailState); advancedTail.provisional_asr.window_start_seconds = 9;
   advancedTail.provisional_asr.revision = 5; advancedTail.provisional_asr.through_seconds = 15;
   advancedTail.provisional_asr.lines = [{id: 'p5-l0', text: 'Next live revision.', start_seconds: 9, end_seconds: 15}];
   flow.app.acceptState(advancedTail);
-  assert.equal(flow.$('transcript').children[1], originalRows[1], 'Canonical text returns above the window with its DOM node intact');
-  assert.deepEqual(flow.$('provisional-history-lines').children, [originalRows[2]]);
+  assert.deepEqual(flow.$('transcript').children, [...originalRows, flow.$('provisional-region')], 'A rolling preview never hides or moves saved rows into another container');
+  assert.equal(flow.$('transcript').scrollTop, 100, 'Preview revisions preserve the position while reading earlier speech');
+  assert.equal(flow.dom.activeElement, originalRows[1], 'Preview revisions preserve focus on an earlier source');
   assert.equal(flow.$('provisional-lines').textContent, 'Next live revision.', 'Only the latest rolling snapshot remains in the main flow');
   const canonicalCaughtUp = structuredClone(advancedTail); canonicalCaughtUp.asr.through_seconds = 15;
   flow.app.acceptState(canonicalCaughtUp);
-  assert.deepEqual(flow.$('transcript').children, originalRows, 'Canonical catch-up restores the complete original flow');
-  assert.equal(flow.$('provisional-history').hidden, true);
+  assert.deepEqual(flow.$('transcript').children, originalRows, 'Canonical catch-up removes only the temporary tail');
+  assert.equal(flow.$('transcript').scrollTop, 100);
   const oldSchedule = structuredClone(canonicalCaughtUp); oldSchedule.provisional_asr.enabled = false;
   oldSchedule.asr.schedule = {state: 'waiting', reason: 'recording', clock: 'audio', interval_seconds: 15, remaining_seconds: 15};
   flow.app.acceptState(oldSchedule);
@@ -678,6 +677,9 @@ async function run() {
   const changedAnalysis = structuredClone(newer); changedAnalysis.analysis.result.headline.text = '分析だけ更新';
   scrolling.app.acceptState(changedAnalysis);
   assert.equal(scrolling.$('transcript').children[0], rawRow); assert.equal(scrolling.$('transcript').scrollTop, 100, 'Translation/analysis updates leave the original reading position intact');
+  scrolling.app.freeze(); scrolling.app.goLive();
+  assert.equal(scrolling.$('transcript').scrollTop, scrolling.$('transcript').scrollHeight, 'Returning to latest scrolls down even when no new source text has arrived');
+  assert.equal(scrolling.$('transcript').children[0], rawRow, 'Returning to latest does not rebuild saved rows');
   const interpretation = scrolling.$('headline');
   scrolling.$('concepts-list').focus();
   scrolling.$('transcript').scrollTop = 740;
@@ -1081,6 +1083,7 @@ async function run() {
   }
   const readingHTML = fs.readFileSync(path.join(__dirname, '../lecture-dashboard/index.html'), 'utf8');
   assert.doesNotMatch(readingHTML, /翻訳の詳細|整理の詳細|補足について|これまでの整理|AIの解釈|自動認識 · グレー/);
+  assert.doesNotMatch(readingHTML, /provisional-history|前の認識を見る/, 'Earlier recognition has no collapsed history widget');
   assert(readingHTML.indexOf('id="action-message"') > readingHTML.indexOf('</section>'), 'Action errors are outside setup, so saved views do not hide them');
 
   const rewind = appFixture();
