@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "clock": "seconds relative to the recorded session start",
+  "audio_seconds": 325.567,
+  "duration_seconds": 349.9220201969147,
+  "line_count": 62,
+  "translation_count": 20,
+  "analysis_count": 6,
+  "provisional_count": 87,
+  "generation_failure_count": 6,
+  "files": {
+    "audio.wav": {
+      "bytes": 10418222,
+      "sha256": "da7a7c8202a28b24e3a24a0bcfd7f4da0a786c30884975101d60a876c34301f3"
+    },
+    "session/analysis-history.jsonl": {
+      "bytes": 30570,
+      "sha256": "a8323f9719962b4bb9e3c4f4459dd6ebd7087b9c98e7bd6b3f01207d04372207"
+    },
+    "session/cost-report.json": {
+      "bytes": 208,
+      "sha256": "344fb372891c10019bcf3398737efdd6558beda46d8a57808a9f2ec1bc1e8ba4"
+    },
+    "session/generation-events.jsonl": {
+      "bytes": 1512,
+      "sha256": "f662cac8974a45eba37e9760603c910945ba1dd77d8bb2e6e21ea479d635ae38"
+    },
+    "session/measurements.jsonl": {
+      "bytes": 10457,
+      "sha256": "62973d0eb262297dd0a17ac6c6c78b1f950ad4b84a0888c653b93671006245f6"
+    },
+    "session/provisional-history.jsonl": {
+      "bytes": 93010,
+      "sha256": "784f24dfcb044a1181d74a25a1c6c36bb561caf3fac1922001976836b1ea7e58"
+    },
+    "session/runtime-manifest.json": {
+      "bytes": 543,
+      "sha256": "ef1b00e196bdb0e4b18ebca3dfec2deaa5dd22cf593810566eff275919b16cb5"
+    },
+    "session/state.json": {
+      "bytes": 43367,
+      "sha256": "ec61cc815965353c24015d1cde465de9840e6bd7d8a11e47bf2d5a597fcdf0ad"
+    },
+    "session/transcript.jsonl": {
+      "bytes": 22023,
+      "sha256": "cb38c02f4d9a74e031ca30690765092b3095b8f9486f4f8fc71ce8c9c52749cf"
+    },
+    "session/translation-history.jsonl": {
+      "bytes": 21568,
+      "sha256": "e42613c2df5c83128741bdb294b303a82b13977d8ac8c0a4c2ce75b200c3cefd"
+    }
+  }
+}

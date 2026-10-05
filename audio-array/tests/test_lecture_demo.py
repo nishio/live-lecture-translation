@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lecture_demo import DemoTimeline, DemoDataError, make_server
+from lecture_demo import DemoTimeline, DemoDataError, make_server, main
 
 
 class DemoTests(unittest.TestCase):
@@ -41,6 +41,24 @@ class DemoTests(unittest.TestCase):
 
     def write(self, name, value): (self.directory / name).write_text(json.dumps(value))
     def write_rows(self, name, rows): (self.directory / name).write_text(''.join(json.dumps(row) + '\n' for row in rows))
+
+    def test_check_does_not_open_browser_or_server_even_with_open_requested(self):
+        with patch('lecture_demo.make_server') as server, patch('lecture_demo.webbrowser.open') as browser, \
+                patch('sys.stdout', new_callable=io.StringIO):
+            main(['--session', str(self.directory), '--check', '--open'])
+        server.assert_not_called()
+        browser.assert_not_called()
+
+    def test_browser_open_can_be_disabled_and_server_closes_on_interrupt(self):
+        for options, expected in ((['--open'], 1), (['--open', '--no-open'], 0), ([], 0)):
+            with self.subTest(options=options), patch('lecture_demo.make_server') as factory, \
+                    patch('lecture_demo.webbrowser.open') as browser, patch('sys.stdout', new_callable=io.StringIO):
+                server = factory.return_value[0]
+                factory.return_value = (server, 'http://127.0.0.1:9999/?token=synthetic')
+                server.serve_forever.side_effect = KeyboardInterrupt
+                main(['--session', str(self.directory), *options])
+                self.assertEqual(browser.call_count, expected)
+                server.server_close.assert_called_once()
 
     def continuous_fixture(self):
         """Two translation publications; the last arrives after audio/analysis."""

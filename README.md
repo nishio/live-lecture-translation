@@ -24,6 +24,26 @@ The dashboard is in Japanese and is designed to support English lecture listenin
 
 Version **1.0.0** is available for Apple Silicon Macs. See the [release notes and validation status](docs/release-1.0.md) before using it at a lecture, and the [changelog](CHANGELOG.md) for changes since v0.9.0.
 
+## Try it before a live lecture
+
+### Play the bundled Audrey talk
+
+The approximately 5-minute-26-second Audrey Tang audio and its generated original text, Japanese translations and understanding results are included. Extract the [standalone demo ZIP](https://github.com/nishio/live-lecture-translation/releases/download/v1.0.0/audrey-demo.zip), or download or clone the repository, then run this from its directory:
+
+```sh
+./demo.command
+```
+
+The browser opens automatically. Press **「▶再生」** to hear the talk and see the original text, translations and current understanding appear at their recorded publication times. Pause, seek and restart are available. Press Ctrl-C in the terminal when finished.
+
+**Playback needs only Python 3.9 or later. It does not need `setup.command`, a speech model, Swift or an API key, and incurs no API charges.** The recorded run used nominal three-second previews, 15-second translation starts and 60-second understanding updates. Around 1:20–1:28, a new translation appears while understanding generation continues. Playback does not perform new recognition or translation.
+
+The audio comes from [Audrey Tang's talk](https://www.youtube.com/watch?v=4_tge6XJhGA), published by Code for Japan. See the [bundle contents, attribution and CC BY notice](samples/audrey-plurality-seoul-2023/demo/README.md) and [original generation measurements and costs](docs/experiments/parallel-cloud-audrey.md). Recognition, translation and explanations are uncorrected. An earlier run's [public text sample](samples/audrey-plurality-seoul-2023/README.md) is also available for reading.
+
+### Try your own recording
+
+Follow the [recorded-audio guide](docs/audio-experiments.md), starting with the first two minutes of an English recording. MP3, M4A, WAV and video with audio are supported. This path requires application setup and performs new recognition; generating Japanese translations and understanding results uses the paid API.
+
 ## Requirements and setup
 
 Transcription uses an Apple Silicon Mac and Python 3.12 or later. Apple's Command Line Tools provide the Swift compiler used to build the small native microphone helper on your Mac. Swift prepares that recording program; it does not run the speech recognition model. The current standard setup checks that the compiler is available. Windows, Linux, and Intel Macs have not been validated.
@@ -35,24 +55,6 @@ Download or clone the repository, then run the initial setup from its directory.
 ```sh
 ./setup.command
 ```
-
-## Try it before a live lecture
-
-### Watch an Audrey talk demo
-
-Use [Audrey Tang's approximately 5-minute-26-second talk](https://www.youtube.com/watch?v=4_tge6XJhGA), published by Code for Japan, to try the original text, Japanese translation and current understanding view while listening. No microphone is needed. This walkthrough uses nominal three-second original-text previews, translation starts every 15 seconds and understanding updates every 60 seconds, with the two cloud stages running independently.
-
-1. Follow the [Audrey demo walkthrough](docs/audio-experiments.md#audrey-demo) to obtain the audio and configure your API key, permitted text and spending limit.
-2. Run the provided command to generate transcription, Japanese translation and understanding results for the full talk. Allow the 5-minute-26-second audio duration plus model preparation and remaining processing time. This generation step does not play sound through the speakers.
-3. Once processing completes, run the saved-result playback command. Open the displayed local URL and press **「▶再生」** to play the audio and screen together at 1×. You can pause, seek and restart.
-
-**Initial translation and understanding generation use the paid API. Replaying the saved results makes no additional API requests or charges.** Audio and ready-to-play demo data are not bundled, so this walkthrough creates a demo on your Mac. Generated wording and publication times vary between runs. See the [measured results and costs for these settings](docs/experiments/parallel-cloud-audrey.md).
-
-To read examples without setup, explore the [public text sample](samples/audrey-plurality-seoul-2023/README.md) from an earlier run. It contains excerpts of the original text, translation, key points and concept explanations; it is not the playback screen. The source carries a CC BY notice, with attribution, transformation and uncertainty notes preserved. Generated output is uncorrected.
-
-### Try your own recording
-
-Follow the [recorded-audio guide](docs/audio-experiments.md), starting with the first two minutes of an English recording. You can use MP3, M4A, WAV, or a video with audio. Choose transcription alone or add Japanese translation and key points through the paid API, then view the results with audio playback.
 
 ## Use with a microphone
 
@@ -136,7 +138,7 @@ See [experiment records](docs/experiments/README.md) for detailed conditions and
 | `wiki/` | Reusable engineering decisions and open development questions |
 | `CHANGELOG.md` | Release-level changes |
 
-Store recordings, transcripts, translations, and other session data in the ignored `data/` and `results/` directories; keep them out of commits. The Audrey Tang public-lecture text in `samples/` is an exception. Audio and raw runtime artifacts must remain private. See [data handling](docs/data-handling.md) for details.
+Store recordings, transcripts, translations, and other session data in the ignored `data/` and `results/` directories; keep them out of commits. The Audrey public-lecture text and explicitly approved `demo/` audio and playback export under `samples/` are exceptions. Other audio and raw runtime artifacts remain private. See [data handling](docs/data-handling.md) for details.
 
 ## Development checks
 

@@ -1,0 +1,8 @@
+{
+  "provider": "openai",
+  "additional_api_usd": null,
+  "successful_generation_api_usd": 0.1727353,
+  "confirmed_api_usd": 0.1727353,
+  "retained_reservation_usd": 0.56391,
+  "matching_request_count": 29
+}

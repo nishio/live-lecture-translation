@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Bundle the explicitly approved Audrey public lecture audio and generated 15/60-second playback data. Open it with `./demo.command` using Python standard-library modules only, without model setup or API access. Preserve source attribution, uncertainty, actual timing and failed requests while excluding private runtime/account data.
+
 ## 1.0.0 — 2026-10-06
 
 First stable release for Apple Silicon Macs, following review of the actual Audrey parallel-processing demo. Includes the rc.1 features below and the subsequent changes in this section. Same-session recording pause/resume remains unavailable, and current-version microphone/cloud acceptance remains a documented follow-up. See the [release notes and validation scope](docs/release-1.0.md).

@@ -18,6 +18,7 @@ import re
 import secrets
 from urllib.parse import parse_qs, urlsplit
 import wave
+import webbrowser
 
 from lecture_source_policy import SOURCE_POLICY_VERSION, plan_source_policy
 
@@ -718,13 +719,15 @@ def make_server(timeline, port=8777):
     return server, f'http://127.0.0.1:{server.server_port}/?token={token}'
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--session', type=Path, required=True)
     parser.add_argument('--port', type=int, default=8777)
     parser.add_argument('--audio-file', type=Path, help='explicit matching 16 kHz mono PCM16 WAV for authenticated browser playback')
     parser.add_argument('--check', action='store_true', help='validate saved records without starting a server')
-    args = parser.parse_args()
+    parser.add_argument('--open', action='store_true', help='open the saved-result viewer in the browser')
+    parser.add_argument('--no-open', dest='open', action='store_false', help='print the URL without opening a browser')
+    args = parser.parse_args(argv)
     timeline = DemoTimeline(args.session, audio_file=args.audio_file)
     if args.check:
         print(json.dumps(timeline.metadata(), ensure_ascii=False, indent=2)); return
@@ -732,7 +735,13 @@ def main():
     print('保存結果の表示再現・追加API $0。録音・ASR・外部APIは実行しません。'
           + ('指定した保存音声をブラウザで再生できます。' if timeline.audio else '音声再生なし。'), flush=True)
     print(url, flush=True)
-    try: server.serve_forever()
+    try:
+        if args.open:
+            try:
+                webbrowser.open(url)
+            except (webbrowser.Error, OSError):
+                print('ブラウザを開けませんでした。上のURLを開いてください。', flush=True)
+        server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close()
 

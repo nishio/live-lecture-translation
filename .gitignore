@@ -13,6 +13,7 @@ __pycache__/
 /config/lecture.json
 /config/*local*
 *.wav
+!/samples/audrey-plurality-seoul-2023/demo/audio.wav
 *.pcm
 *.mp3
 *.mp4
