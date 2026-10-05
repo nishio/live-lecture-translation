@@ -873,6 +873,11 @@ async function run() {
   assert.equal(schedules.$('translation-pause-retries').hidden, true);
   for (const remaining of [NaN, Infinity, null]) assert.doesNotMatch(schedulePresentation({state: 'waiting', remaining_seconds: remaining}, true).label, /NaN|Infinity/);
   assert.equal(schedulePresentation({state: 'complete', reason: 'no_pending'}, true).label, '処理済み');
+  for (const [waitingFor, name] of [['translation', '翻訳'], ['analysis', '整理']]) {
+    assert.deepEqual(schedulePresentation({state: 'busy', reason: 'shared_slot', waiting_for: waitingFor}, true),
+      {state: 'busy', label: `${name}の完了待ち`, compact: `${name}待ち`, fraction: 0});
+  }
+  assert.equal(schedulePresentation({state: 'busy', reason: 'shared_slot', waiting_for: 'unknown'}, true).compact, '順番待ち', 'Old or unknown schedules do not invent the stage being awaited');
   assert.equal(schedulePresentation({state: 'blocked', reason: 'manual_retry'}, true).compact, '要確認');
   assert.equal(schedulePresentation({state: 'complete', reason: 'no_pending'}, true).compact, '処理済み');
   assert.equal(schedulePresentation({state: 'waiting', reason: 'offline', remaining_seconds: 20}, true).compact, '接続待ち 20秒');

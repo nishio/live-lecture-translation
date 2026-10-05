@@ -567,8 +567,42 @@ class DemoTests(unittest.TestCase):
         self.assertIsNone(timeline.snapshot(16)['translation']['schedule']['remaining_seconds'])
         self.assertEqual(timeline.snapshot(23)['translation']['schedule']['remaining_seconds'], 8)
         self.assertEqual(timeline.snapshot(28)['translation']['schedule']['reason'], 'shared_slot')
+        self.assertEqual(timeline.snapshot(28)['translation']['schedule']['waiting_for'], 'analysis')
         self.assertEqual(timeline.snapshot(35)['translation']['schedule']['state'], 'complete')
         self.assertEqual(timeline.snapshot(35)['capture']['audio_seconds'], 20)
+
+    def test_recorded_peer_does_not_hide_own_interval_or_retime_content(self):
+        histories, translated = self.continuous_fixture()
+        state = json.loads((self.directory / 'state.json').read_text())
+        state['capture']['audio_seconds'] = 120
+        # Capture continues while the earlier analysis is in progress. The
+        # second translation is due at 1015 + 60, but starts only at 1090.
+        self.transcripts.append({'chunk': {'end_seconds': 120, 'completed_at': 1120}, 'lines': []})
+        measured = deepcopy(self.measurements)
+        measured[-1].update(published_at=1090, processing_seconds=50)
+        measured.append({'stage': 'asr', 'published_at': 1122, 'processing_seconds': 2,
+                         'capture_seconds': 120, 'through_seconds': 120})
+        histories[1].update(started_at=1090, published_at=1093)
+        histories[1]['blocks'][0]['published_at'] = 1093
+        translated[1].update(started_at=1090, published_at=1093, processing_seconds=3)
+        state['translation']['blocks'] = [block for row in histories for block in row['blocks']]
+        self.write('state.json', state)
+        self.write_rows('transcript.jsonl', self.transcripts)
+        self.write_rows('translation-history.jsonl', histories)
+        self.write_rows('measurements.jsonl', measured + translated)
+        timeline = DemoTimeline(self.directory)
+        waiting = timeline.snapshot(50)['translation']['schedule']
+        self.assertEqual(('waiting', 'interval', 25, None),
+                         tuple(waiting[key] for key in ('state', 'reason', 'remaining_seconds', 'waiting_for')))
+        blocked = timeline.snapshot(75)['translation']['schedule']
+        self.assertEqual(('busy', 'shared_slot', None, 'analysis'),
+                         tuple(blocked[key] for key in ('state', 'reason', 'remaining_seconds', 'waiting_for')))
+        self.assertEqual('request', timeline.snapshot(90)['translation']['schedule']['reason'])
+        self.assertEqual(1, len(timeline.snapshot(92.999)['translation']['blocks']))
+        self.assertEqual(1093, timeline.snapshot(93)['translation']['blocks'][-1]['published_at'])
+        rewound = timeline.snapshot(50)['translation']
+        self.assertEqual(waiting, rewound['schedule'])
+        self.assertEqual(1, len(rewound['blocks']))
 
     def initial_translation_fixture(self, marker=True):
         self.continuous_fixture()
@@ -596,6 +630,7 @@ class DemoTests(unittest.TestCase):
             self.assertEqual(state['translation']['blocks'], [])
         for at in (15, 17.999):
             self.assertEqual(timeline.snapshot(at)['analysis']['schedule']['reason'], 'shared_slot')
+            self.assertEqual(timeline.snapshot(at)['analysis']['schedule']['waiting_for'], 'translation')
         first_translation = timeline.snapshot(18)
         self.assertEqual(first_translation['analysis']['schedule']['reason'], 'request')
         self.assertEqual(first_translation['translation']['blocks'][0]['published_at'], 1018)
@@ -603,6 +638,32 @@ class DemoTests(unittest.TestCase):
         self.assertIsNone(timeline.snapshot(19.999)['analysis']['result'])
         self.assertEqual(timeline.snapshot(20)['analysis']['generated_at'], 1020)
         self.assertEqual(timeline.snapshot(12)['analysis']['schedule']['reason'], 'initial_translation', 'Rewinding restores only the recorded initial wait')
+
+    def test_parallel_recording_has_no_shared_slot_and_keeps_publication_times(self):
+        self.continuous_fixture()
+        runtime = json.loads((self.directory / 'runtime-manifest.json').read_text())
+        runtime['configuration']['parallel_cloud_stages'] = True
+        self.write('runtime-manifest.json', runtime)
+        timeline = DemoTimeline(self.directory)
+        # Analysis runs from 1026 to 1030, translation begins at 1031. These
+        # recorded times do not imply that translation waits for analysis.
+        schedule = timeline.snapshot(28)['translation']['schedule']
+        self.assertEqual(('waiting', 'interval', 3, None),
+            tuple(schedule[key] for key in ('state', 'reason', 'remaining_seconds', 'waiting_for')))
+        self.assertEqual(1, len(timeline.snapshot(34.999)['translation']['blocks']))
+        self.assertEqual(2, len(timeline.snapshot(35)['translation']['blocks']))
+
+    def test_parallel_first_analysis_waits_only_for_initial_translation_outcome(self):
+        self.initial_translation_fixture()
+        runtime = json.loads((self.directory / 'runtime-manifest.json').read_text())
+        runtime['configuration']['parallel_cloud_stages'] = True
+        self.write('runtime-manifest.json', runtime)
+        timeline = DemoTimeline(self.directory)
+        for at in (12, 15, 17.999):
+            self.assertEqual('initial_translation', timeline.snapshot(at)['analysis']['schedule']['reason'])
+        self.assertEqual('request', timeline.snapshot(18)['analysis']['schedule']['reason'])
+        self.assertIsNone(timeline.snapshot(19.999)['analysis']['result'])
+        self.assertEqual(1020, timeline.snapshot(20)['analysis']['generated_at'])
 
     def test_initial_translation_failure_releases_saved_analysis_without_fake_success(self):
         measured = self.initial_translation_fixture()

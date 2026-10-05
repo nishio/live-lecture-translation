@@ -10,6 +10,7 @@ __pycache__/
 /results/
 /report/
 /config/authorization.json
+/config/lecture.json
 /config/*local*
 *.wav
 *.pcm

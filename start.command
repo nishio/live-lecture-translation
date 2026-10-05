@@ -8,26 +8,57 @@ llt_repo="${0:A:h}"
 llt_python="${llt_repo}/.venv/bin/python"
 llt_cloud=0
 llt_check=0
+llt_estimate=0
 llt_authorization=''
 llt_keyfile=''
+llt_settings_args=()
+llt_hours=1
+llt_hours_given=0
 while (( $# )); do
   case "$1" in
     --cloud) llt_cloud=1; shift ;;
     --check) llt_check=1; shift ;;
-    --authorization|--key-file)
+    --estimate) llt_estimate=1; shift ;;
+    --authorization|--key-file|--settings|--hours)
       (( $# >= 2 )) || { print -u2 -- "Missing value for $1"; exit 1; }
-      if [[ "$1" == --authorization ]]; then llt_authorization="$2"; else llt_keyfile="$2"; fi
+      case "$1" in
+        --authorization) llt_authorization="$2" ;;
+        --key-file) llt_keyfile="$2" ;;
+        --settings) llt_settings_args=(--settings "$2") ;;
+        --hours) llt_hours="$2"; llt_hours_given=1 ;;
+      esac
       shift 2 ;;
-    *) print -u2 -- 'Usage: ./start.command [--check] [--cloud --authorization config/authorization.json [--key-file private.env]]'; exit 1 ;;
+    *) print -u2 -- 'Usage: ./start.command [--estimate] [--settings PATH] [--hours N] [--check] [--cloud --authorization config/authorization.json [--key-file private.env]]'; exit 1 ;;
   esac
 done
 cd -- "$llt_repo"
+if [[ "$llt_estimate" -eq 1 ]]; then
+  # Estimation is standard-library only and does not inspect a running app.
+  export PYTHONDONTWRITEBYTECODE=1
+  if [[ ! -x "$llt_python" ]]; then
+    llt_python="$(command -v python3)" || { print -u2 -- 'Python 3 is required for estimation.'; exit 1; }
+  fi
+  exec "$llt_python" audio-array/lecture_cost_estimate.py "${llt_settings_args[@]}" --hours "$llt_hours"
+fi
 [[ -x "$llt_python" ]] || { print -u2 -- 'Run ./setup.command first.'; exit 1; }
+if [[ "$llt_hours_given" -eq 1 && "$llt_cloud" -eq 0 ]]; then
+  print -u2 -- '--hours requires --estimate or --cloud.'
+  exit 1
+fi
+# Read once: both the estimate and the new runtime receive these exact values.
+llt_intervals="$("$llt_python" audio-array/lecture_settings.py "${llt_settings_args[@]}")"
+read -r llt_translation_interval llt_analysis_interval <<< "$llt_intervals"
+print -- "起動設定: 翻訳 ${llt_translation_interval} 秒 / 整理 ${llt_analysis_interval} 秒"
+if [[ "$llt_cloud" -eq 1 ]]; then
+  "$llt_python" audio-array/lecture_cost_estimate.py --hours "$llt_hours" \
+    --translation-interval "$llt_translation_interval" --analysis-interval "$llt_analysis_interval"
+fi
 if [[ "$llt_cloud" -eq 1 && -z "$llt_authorization" ]]; then
   print -u2 -- '--cloud requires --authorization with your explicit text scope and daily budget.'
   exit 1
 fi
 if /usr/sbin/lsof -nP -iTCP:8776 -sTCP:LISTEN -t >/dev/null 2>&1; then
+  print -- '変更した間隔は既存アプリに反映されません。停止して終了後に再起動してください。'
   llt_reuse=(--url-file "${llt_repo}/results/event-audio/mac-live-continuous/url.txt")
   [[ "$llt_cloud" -eq 1 ]] && llt_reuse+=(--cloud)
   [[ "$llt_check" -eq 1 ]] && llt_reuse+=(--check)
@@ -77,11 +108,11 @@ if sys.argv[1] == '1':
 print('Preparation checked. No microphone, inference, or paid API request was started.')
 PY
 if [[ "$llt_check" -eq 1 ]]; then exit 0; fi
-llt_options=(--port 8776 --open --continuous-translation --translation-interval 60 --analysis-interval 120 --language en)
+llt_options=(--port 8776 --open --continuous-translation --translation-interval "$llt_translation_interval" --analysis-interval "$llt_analysis_interval" --language en)
 if [[ "$llt_cloud" -eq 1 ]]; then
   llt_options+=(--allow-cloud --cloud-authorization "$llt_authorization" --model gpt-6.1-sol)
   [[ -n "$llt_keyfile" ]] && llt_options+=(--key-file "$llt_keyfile")
 fi
 print -- 'The app opens on port 8776. Choose the microphone and press Start when ready.'
-print -- 'Keep the Mac awake and this terminal open. Stop in the UI, wait for saving and pending work, then exit.'
+print -- 'Keep the Mac awake and this terminal open. Stop in the UI; wait for audio saving and any already started operation, then exit.'
 exec "$llt_python" -u audio-array/lecture_live.py "${llt_options[@]}"

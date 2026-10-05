@@ -333,12 +333,10 @@ class LectureApp:
         self.lock = threading.RLock()
         self.state = blank_state()
         self.recorder = self.worker = self.source_thread = None
-        self.cloud_worker = None
-        self._cloud_outcome = None
-        self.cloud_kind = None
+        self.cloud_workers = {'analysis': None, 'translation': None}
+        self._cloud_outcomes = {'analysis': None, 'translation': None}
         self.translation_retry_event = threading.Event()
         self._generation_last_started = {'analysis': -math.inf, 'translation': -math.inf}
-        self._generation_last_kind = None
         self._analysis_last_source_id = None
         self._analysis_manual_required = False
         self._generation_offline = {'analysis': False, 'translation': False}
@@ -359,6 +357,10 @@ class LectureApp:
         self.chunk_completed_at = {}
         self.cloud_baseline_keys = set()
 
+    def _cloud_alive(self, kind=None):
+        workers = self.cloud_workers.values() if kind is None else (self.cloud_workers[kind],)
+        return any(worker is not None and worker.is_alive() for worker in workers)
+
     def snapshot(self):
         with self.lock:
             self._refresh_translation_locked()
@@ -374,10 +376,10 @@ class LectureApp:
             result['asr']['schedule'] = self._asr_schedule_locked()
             if result.get('provisional_asr') is not None:
                 result['provisional_asr']['schedule'] = self._provisional_schedule_locked()
-            cloud_alive = bool(self.cloud_worker and self.cloud_worker.is_alive())
+            cloud_alive = self._cloud_alive()
             result['processing_active'] = bool(preparation_alive or cloud_alive or
                 (self.worker and self.worker.is_alive() and not self.worker_finishing))
-            result['analysis']['worker_alive'] = bool((cloud_alive and self.cloud_kind == 'analysis') or
+            result['analysis']['worker_alive'] = bool(self._cloud_alive('analysis') or
                 (result['analysis']['provider'] == 'local' and result['analysis']['state'] == 'running'
                  and self.worker and self.worker.is_alive()))
             result['analysis']['completion_confirmed'] = (not result['analysis']['worker_alive'] and
@@ -397,7 +399,7 @@ class LectureApp:
             result['capabilities'].update(continuous_translation=self.continuous_translation,
                 continuous_translation_enabled=self.continuous_translation,
                 translation_interval_seconds=self.translation_interval,
-                analysis_history_paging=True,
+                analysis_history_paging=True, parallel_cloud_stages=True,
                 provisional_refresh_seconds=self.provisional_refresh_seconds,
                 provisional_window_seconds=self.provisional_window_seconds)
             from lecture_readiness import AGENDA
@@ -449,7 +451,7 @@ class LectureApp:
                 stage['completion_confirmed'] = not stage['worker_alive'] and stage['state'] not in {'running', 'paused'}
         active = bool((self.source_thread and self.source_thread.is_alive() and not self.source_done.is_set())
             or (self.worker and self.worker.is_alive() and not self.worker_finishing)
-            or (self.cloud_worker and self.cloud_worker.is_alive()) or self.inference_unconfirmed)
+            or self._cloud_alive() or self.inference_unconfirmed)
         if self.recorder:
             observed = self.recorder.snapshot()
             active = active or not (observed.get('stop_confirmed', False) and observed.get('callbacks_confirmed', False))
@@ -631,12 +633,12 @@ class LectureApp:
                 newest != self._analysis_last_source_id or self._generation_offline[kind])
             # At startup, understanding support should follow the first
             # available translation. A boundary wait holds no cloud slot;
-            # an admitted attempt or preparation failure releases this gate.
+            # publication or a failed attempt releases this initial-only gate.
             translation = self.state['translation']
             translation_recovery = self._recovery['translation']
             if (wants and self._continuous_enabled() and translation['pending_lines']
                     and not math.isfinite(self._generation_last_started['analysis'])
-                    and not math.isfinite(self._generation_last_started['translation'])
+                    and not translation['blocks']
                     and not translation['retry_required']
                     and not translation_recovery['error']
                     and not translation_recovery['paused'] and not translation_recovery['exhausted']):
@@ -657,6 +659,7 @@ class LectureApp:
         interval = self.translation_interval if kind == 'translation' else self.analysis_interval
         result = {'state': 'idle', 'reason': 'no_source', 'interval_seconds': interval,
                   'wait_seconds': interval, 'remaining_seconds': None, 'due_at': None,
+                  'waiting_for': None,
                   'retry': {'attempts': recovery['attempts'], 'max_attempts': MAX_AUTO_RETRIES,
                             'next_at': wall + remaining if remaining is not None else None,
                             'remaining_seconds': remaining, 'delay_seconds': recovery['delay'],
@@ -672,7 +675,7 @@ class LectureApp:
         enabled = self._continuous_enabled() if kind == 'translation' else self.state['analysis']['provider'] != 'off'
         if not enabled:
             return status('idle', 'disabled')
-        if self.cloud_worker is not None and self.cloud_kind == kind:
+        if self.cloud_workers[kind] is not None:
             return status('busy', 'request')
         if kind == 'analysis' and self.state[kind]['state'] == 'running':
             return status('busy', 'request')
@@ -698,14 +701,16 @@ class LectureApp:
             if reason in {'continuation', 'initial_translation'}:
                 return status('waiting', reason)
             return status('complete' if finished else 'idle', 'no_pending' if newest else 'no_source')
+        delay = max(0, due - now)
+        if delay > 0:
+            result.update(remaining_seconds=delay, due_at=wall + delay,
+                          wait_seconds=recovery['delay'] if reason == 'retry' else (OFFLINE_RECHECK_SECONDS if reason == 'offline' else interval))
+            return status('waiting', reason)
         if not self.audio_queue.empty():
             return status('busy', 'asr')
-        if self.cloud_worker is not None:
-            return status('busy', 'shared_slot')
-        delay = max(0, due - now)
         result.update(remaining_seconds=delay, due_at=wall + delay,
                       wait_seconds=recovery['delay'] if reason == 'retry' else (OFFLINE_RECHECK_SECONDS if reason == 'offline' else interval))
-        return status('waiting' if delay > 0 else 'due', reason)
+        return status('due', reason)
 
     def _refresh_translation_locked(self):
         legacy = legacy_source_policy(self.state)
@@ -731,7 +736,7 @@ class LectureApp:
             excluded_uncertain_lines=sum(line['uncertain'] and bool(line['exclusion_reason']) for line in lines),
             native_lines=sum(not line['exclusion_reason']
                              and line.get('language') == 'ja' for line in lines),
-            worker_alive=bool(self.cloud_worker and self.cloud_worker.is_alive() and self.cloud_kind == 'translation'))
+            worker_alive=self._cloud_alive('translation'))
         if not pending:
             translation.update(ready_lines=0, waiting_lines=0)
         if translation['enabled'] and pending and translation['state'] == 'completed':
@@ -786,7 +791,7 @@ class LectureApp:
             if self.asr_preparation['state'] == 'ready':
                 return self.snapshot()
             if self.state['capture']['state'] in ACTIVE or any(thread and thread.is_alive()
-                    for thread in (self.worker, self.source_thread, self.cloud_worker)):
+                    for thread in (self.worker, self.source_thread, *self.cloud_workers.values())):
                 raise RuntimeError('録音または処理が進行中です。')
             self.preparation_cancel = threading.Event()
             event = self.preparation_cancel
@@ -852,7 +857,7 @@ class LectureApp:
                     or (self.preparation_thread and self.preparation_thread.is_alive())):
                 raise ValueError('音声認識の準備が完了してから開始してください。録音はまだ始まっていません。')
             if (self.state['capture']['state'] in ACTIVE or (self.worker and self.worker.is_alive())
-                    or (self.cloud_worker and self.cloud_worker.is_alive())
+                    or self._cloud_alive()
                     or (self.source_thread and self.source_thread.is_alive())
                     or (self.recorder and not all(self.recorder.snapshot().get(key, False)
                                                   for key in ('stop_confirmed', 'callbacks_confirmed')))):
@@ -890,7 +895,6 @@ class LectureApp:
             self.state['translation'].update(enabled=self.continuous_translation and provider == 'openai',
                 state='waiting' if self.continuous_translation and provider == 'openai' else 'idle')
             self._generation_last_started = {'analysis': -math.inf, 'translation': -math.inf}
-            self._generation_last_kind = None
             self._analysis_last_source_id = None
             self._analysis_manual_required = False
             self._generation_offline = {'analysis': False, 'translation': False}
@@ -900,9 +904,8 @@ class LectureApp:
             self.state['message'] = '保存済み音声の逐次再生試験です。' if replay else 'マイクを起動しています。'
             self.recorder = None
             self.worker = self.source_thread = None
-            self.cloud_worker = None
-            self._cloud_outcome = None
-            self.cloud_kind = None
+            self.cloud_workers = {'analysis': None, 'translation': None}
+            self._cloud_outcomes = {'analysis': None, 'translation': None}
             try:
                 save_runtime(self.result_dir, {'language': language, 'provider': provider, 'model': model,
                     'chunk_seconds': self.chunk_seconds, 'analysis_interval': self.analysis_interval,
@@ -910,6 +913,7 @@ class LectureApp:
                     'provisional_window_seconds': self.provisional_window_seconds,
                     'continuous_translation': self.continuous_translation,
                     'initial_translation_first': self._continuous_enabled(),
+                    'parallel_cloud_stages': True,
                     'translation_interval': self.translation_interval,
                     'translation_source_policy_version': SOURCE_POLICY_VERSION,
                     'translation_max_wait_seconds': TRANSLATION_MAX_WAIT_SECONDS,
@@ -1083,7 +1087,7 @@ class LectureApp:
                 raise ValueError('保存結果の閲覧中です。新しく録音を開始してください。')
             if not self.state['lines'] or self.state['analysis']['provider'] == 'off':
                 raise ValueError('解析対象の原文がありません。')
-            if self.state['analysis']['state'] == 'running' or self.cloud_worker is not None:
+            if self.state['analysis']['state'] == 'running' or self.cloud_workers['analysis'] is not None:
                 raise RuntimeError('解析はすでに進行中です。')
             self._manual_recovery('analysis')
             self.retry_event.set()
@@ -1106,8 +1110,8 @@ class LectureApp:
             pending, _ = self._refresh_translation_locked()
             if not pending:
                 raise ValueError('未翻訳の対象原文がありません。')
-            if self.cloud_worker is not None:
-                raise RuntimeError('翻訳または分析がすでに進行中です。')
+            if self.cloud_workers['translation'] is not None:
+                raise RuntimeError('翻訳はすでに進行中です。')
             self._manual_recovery('translation')
             self.translation_retry_event.set()
             if not self.worker or not self.worker.is_alive():
@@ -1135,7 +1139,7 @@ class LectureApp:
             if not self.result_dir or not self._continuous_enabled():
                 raise ValueError('このセッションでは自動再試行を保留できません。')
             recovery = self._recovery[kind]
-            if recovery['next'] is None and not (self.cloud_worker is not None and self.cloud_kind == kind and recovery['attempts']):
+            if recovery['next'] is None and not (self.cloud_workers[kind] is not None and recovery['attempts']):
                 raise ValueError('保留できる自動再試行がありません。')
             recovery.update(paused=True, next=None, manual_requested=False, manual_admitted=False)
             (self.translation_retry_event if kind == 'translation' else self.retry_event).clear()
@@ -1143,7 +1147,7 @@ class LectureApp:
                 self._analysis_manual_required = True
             else:
                 self.state['translation']['retry_required'] = True
-            if not (self.cloud_worker is not None and self.cloud_kind == kind):
+            if not (self.cloud_workers[kind] is not None):
                 self.state[kind]['state'] = 'failed'
             append_json(self.result_dir / 'generation-events.jsonl',
                         {'at': time.time(), 'stage': kind, 'event': 'retry_paused', 'attempts': recovery['attempts']})
@@ -1210,7 +1214,8 @@ class LectureApp:
                 self._begin_retry_attempt('analysis')
             check_processing_allowed()
             receipt = self.cloud_scope.reserve(job['session'], model, through)
-            append_json(result_dir / 'cloud-scope.jsonl', receipt)
+            with self.lock:
+                append_json(result_dir / 'cloud-scope.jsonl', receipt)
         # Manual or policy-admitted retry retains prior charges and rechecks the
         # same text scope and shared budget before another cloud attempt.
         retry_options = {'retry_failed': True} if provider == 'openai' and manual_retry else {}
@@ -1280,7 +1285,7 @@ class LectureApp:
 
     def _start_cloud_analysis(self, *, manual_retry):
         with self.lock:
-            if self.cloud_worker is not None:
+            if self.cloud_workers['analysis'] is not None:
                 raise RuntimeError('クラウド解析はすでに進行中です。')
             job = self._prepare_analysis()
             if job is None:
@@ -1321,7 +1326,8 @@ class LectureApp:
             self._begin_retry_attempt('translation')
         check_processing_allowed()
         receipt = self.cloud_scope.reserve(job['session'], job['model'], plan['through_seconds'])
-        append_json(job['result_dir'] / 'cloud-scope.jsonl', {**receipt, 'stage': 'translation'})
+        with self.lock:
+            append_json(job['result_dir'] / 'cloud-scope.jsonl', {**receipt, 'stage': 'translation'})
         generate = self.translator_override or translate_batch
         check_processing_allowed()
         result = generate(plan, provider='openai', model=job['model'], out_dir=job['result_dir'] / 'translations',
@@ -1408,10 +1414,9 @@ class LectureApp:
         with self.lock:
             if self.closing or job.get('stop_event', self.abort_processing).is_set():
                 raise ProcessingStopped('新しい処理は停止されています。')
-            if self.cloud_worker is not None:
-                raise RuntimeError('翻訳または分析がすでに進行中です。')
-            self._cloud_outcome = None
-            self.cloud_kind = kind
+            if self.cloud_workers[kind] is not None:
+                raise RuntimeError('この処理はすでに進行中です。')
+            self._cloud_outcomes[kind] = None
             self._retry_jobs[kind] = job
             self.state[kind].update(state='running', error=None)
             if kind == 'translation':
@@ -1432,27 +1437,34 @@ class LectureApp:
                         pass  # Preserve the original failure if status storage fails.
                 finally:
                     with self.lock:
-                        self._cloud_outcome = {'error': error, 'kind': kind, 'session_id': job['session']['id']}
-            self.cloud_worker = threading.Thread(target=generate, name='lecture-cloud-' + kind, daemon=False)
+                        self._cloud_outcomes[kind] = {'error': error, 'kind': kind, 'session_id': job['session']['id']}
+            self.cloud_workers[kind] = threading.Thread(target=generate, name='lecture-cloud-' + kind, daemon=False)
             try:
-                self.cloud_worker.start()
+                self.cloud_workers[kind].start()
             except Exception:
-                self.cloud_worker = None
-                self.cloud_kind = None
+                self.cloud_workers[kind] = None
                 raise
 
-    def _take_cloud_outcome(self):
+    def _take_cloud_outcomes(self):
+        outcomes = []
         with self.lock:
-            if self.cloud_worker is None or self.cloud_worker.is_alive():
-                return None
-            self.cloud_worker.join()
-            outcome = self._cloud_outcome or {'error': RuntimeError('クラウド解析の完了結果がありません。')}
-            self.cloud_worker = None
-            self.cloud_kind = None
-            self._cloud_outcome = None
-            return outcome
+            for kind, worker in self.cloud_workers.items():
+                if worker is None or worker.is_alive():
+                    continue
+                worker.join()
+                outcomes.append(self._cloud_outcomes[kind] or {
+                    'kind': kind, 'error': RuntimeError('クラウド処理の完了結果がありません。')})
+                self.cloud_workers[kind] = None
+                self._cloud_outcomes[kind] = None
+        return outcomes
 
     def _cost_report(self, *, session_id=None, result_dir=None):
+        # Both stages can finish together. Serialize the complete read/compute/
+        # replace with publication so an older report cannot overwrite a newer one.
+        with self.lock:
+            return self._cost_report_locked(session_id=session_id, result_dir=result_dir)
+
+    def _cost_report_locked(self, *, session_id=None, result_dir=None):
         with self.lock:
             if session_id is not None and (not self.state['session'] or self.state['session']['id'] != session_id
                                            or self.result_dir != result_dir):
@@ -1495,6 +1507,9 @@ class LectureApp:
         from event_insights_cloud import CloudError
         kind, exc = outcome.get('kind', 'analysis'), outcome['error']
         with self.lock:
+            if outcome.get('session_id') is not None and (not self.state['session']
+                    or outcome['session_id'] != self.state['session']['id']):
+                return
             recovery = self._recovery[kind]
             if isinstance(exc, (ProcessingStopped, InferenceCancelled)):
                 recovery.update(next=None, paused=True, manual_requested=False, manual_admitted=False)
@@ -1547,15 +1562,17 @@ class LectureApp:
         self.persist(force=True)
 
     def _continuous_step(self, finished, newest):
-        """Schedule one generation fairly; retain failures and their pending IDs."""
+        """Admit each cloud stage independently, with at most one job per stage."""
         with self.lock:
             if self.closing or self.abort_processing.is_set():
                 return False
-            if self.cloud_worker is not None:
-                return True
             pending, _ = self._refresh_translation_locked()
             now = time.monotonic()
-            for kind, recovery in self._recovery.items():
+            waiting = any(self.cloud_workers.values())
+            for kind in ('translation', 'analysis'):
+                if self.cloud_workers[kind] is not None:
+                    continue
+                recovery = self._recovery[kind]
                 if (recovery['started'] is not None and (recovery['next'] is not None or self._generation_offline[kind])
                         and now >= recovery['started'] + AUTO_RETRY_WINDOW_SECONDS):
                     recovery.update(next=None, exhausted=True)
@@ -1564,43 +1581,35 @@ class LectureApp:
                         self._analysis_manual_required = True
                     else:
                         self.state[kind]['retry_required'] = True
-            readiness = {kind: self._generation_due(kind, finished, newest, now) for kind in ('analysis', 'translation')}
-            wants = {kind: ready[0] for kind, ready in readiness.items()}
-            due = {kind: ready[0] and ready[1] <= now for kind, ready in readiness.items()}
-            choices = [kind for kind in ('analysis', 'translation') if due[kind]]
-            if not choices:
-                if not pending and self.state['translation']['state'] not in ('failed', 'running', 'paused'):
-                    self.state['translation']['state'] = 'completed' if finished else 'waiting'
-                return bool(wants['translation'] or wants['analysis']) if finished else False
-            kind = (choices[0] if len(choices) == 1 else
-                    ('translation' if self._generation_last_kind == 'analysis' else 'analysis'))
-            event = self.translation_retry_event if kind == 'translation' else self.retry_event
-            requested = event.is_set()
-            event.clear()
-            recovery = self._recovery[kind]
-            recovery['manual_requested'] = False
-            admitted = recovery['manual_admitted']
-            automatic = not (requested or admitted) and (readiness[kind][2] == 'retry' or recovery['started'] is not None)
-            retry_job = self._retry_jobs.get(kind) if automatic or requested or admitted else None
-            if automatic:
-                recovery['next'] = None
-            elif requested or admitted:
-                recovery['next'] = None
-            elif not requested:
-                self._recovery[kind] = recovery_state()
-            try:
-                job = retry_job or (self._prepare_translation() if kind == 'translation' else self._prepare_analysis())
-                if job is not None:
-                    self._generation_last_started[kind] = now
-                    self._generation_last_kind = kind
-                    if kind == 'analysis' and retry_job is None:
-                        self._analysis_last_source_id = newest
-                    self._start_cloud_job(kind, job, requested or admitted or automatic, automatic_retry=automatic)
-            except Exception as exc:
-                failure = self._translation_failed if kind == 'translation' else self._analysis_failed
-                failure(exc)
-                self._generation_completed({'kind': kind, 'error': exc})
-            return True
+                wants, due, reason = self._generation_due(kind, finished, newest, now)
+                waiting = waiting or wants
+                if not wants or due > now:
+                    continue
+                event = self.translation_retry_event if kind == 'translation' else self.retry_event
+                requested = event.is_set()
+                event.clear()
+                recovery['manual_requested'] = False
+                admitted = recovery['manual_admitted']
+                automatic = not (requested or admitted) and (reason == 'retry' or recovery['started'] is not None)
+                retry_job = self._retry_jobs.get(kind) if automatic or requested or admitted else None
+                if automatic or requested or admitted:
+                    recovery['next'] = None
+                else:
+                    self._recovery[kind] = recovery_state()
+                try:
+                    job = retry_job or (self._prepare_translation() if kind == 'translation' else self._prepare_analysis())
+                    if job is not None:
+                        self._generation_last_started[kind] = now
+                        if kind == 'analysis' and retry_job is None:
+                            self._analysis_last_source_id = newest
+                        self._start_cloud_job(kind, job, requested or admitted or automatic, automatic_retry=automatic)
+                except Exception as exc:
+                    failure = self._translation_failed if kind == 'translation' else self._analysis_failed
+                    failure(exc)
+                    self._generation_completed({'kind': kind, 'error': exc})
+            if not pending and self.state['translation']['state'] not in ('failed', 'running', 'paused'):
+                self.state['translation']['state'] = 'completed' if finished else 'waiting'
+            return bool(waiting or any(self.cloud_workers.values()))
 
     def _queue_provisional_locked(self):
         if (not self.provisional_refresh_seconds or self.result_dir is None
@@ -1709,8 +1718,7 @@ class LectureApp:
         try:
             from catchup_page import build_lines
             while True:
-                outcome = self._take_cloud_outcome()
-                if outcome is not None:
+                for outcome in self._take_cloud_outcomes():
                     if self._continuous_enabled():
                         self._generation_completed(outcome)
                     else:
@@ -1721,9 +1729,10 @@ class LectureApp:
                     with self.lock:
                         if self.state['asr']['state'] != 'failed':
                             self.state['asr'].update(state='paused', error=None)
-                        pending = self.cloud_worker
-                    if pending is not None:
-                        pending.join(.2)
+                        pending = [worker for worker in self.cloud_workers.values() if worker is not None]
+                    if pending:
+                        for worker in pending:
+                            worker.join(.1)
                         continue
                     with self.lock:
                         for kind in ('analysis', 'translation'):
@@ -1789,12 +1798,12 @@ class LectureApp:
                     newest = eligible[-1]['id'] if eligible else None
                     provider = self.state['analysis']['provider']
                     enabled = provider != 'off'
-                    analysis_available = self.cloud_worker is None
+                    analysis_available = self.cloud_workers['analysis'] is None
                 if self._continuous_enabled():
                     waiting = self._continuous_step(finished, newest) if self.audio_queue.empty() else True
                     if finished:
                         with self.lock:
-                            if not waiting and self.cloud_worker is None and not self.retry_event.is_set() and not self.translation_retry_event.is_set():
+                            if not waiting and not any(self.cloud_workers.values()) and not self.retry_event.is_set() and not self.translation_retry_event.is_set():
                                 self.worker_finishing = True
                                 break
                     continue
@@ -1830,7 +1839,7 @@ class LectureApp:
                             break
                 if finished:
                     with self.lock:
-                        if self.cloud_worker is None and not self.retry_event.is_set():
+                        if not any(self.cloud_workers.values()) and not self.retry_event.is_set():
                             self.worker_finishing = True
                             break
             with self.lock:
@@ -1857,10 +1866,14 @@ class LectureApp:
             # Even a processing/storage exception must not orphan a live cloud
             # request. close() has its own bounded wait and reports this owner
             # thread as still active until the request actually ends.
-            pending = self.cloud_worker
-            if pending is not None:
-                pending.join()
-                self._take_cloud_outcome()
+            with self.lock:
+                pending = list(self.cloud_workers.values())
+            for worker in pending:
+                if worker is not None:
+                    worker.join()
+            for outcome in self._take_cloud_outcomes():
+                if self._continuous_enabled():
+                    self._generation_completed(outcome)
             with self.lock:
                 self.worker_finishing = True
             self.persist(force=True)
@@ -1878,11 +1891,11 @@ class LectureApp:
         if self.readiness:
             self.readiness.close()
         deadline = time.monotonic() + timeout
-        for thread in (self.preparation_thread, self.source_thread, self.worker, self.cloud_worker):
+        for thread in (self.preparation_thread, self.source_thread, self.worker, *self.cloud_workers.values()):
             if thread:
                 thread.join(max(0, deadline - time.monotonic()))
         complete = not any(thread and thread.is_alive()
-                           for thread in (self.preparation_thread, self.source_thread, self.worker, self.cloud_worker))
+                           for thread in (self.preparation_thread, self.source_thread, self.worker, *self.cloud_workers.values()))
         if self.recorder:
             observed = self.recorder.snapshot()
             complete = complete and observed.get('stop_confirmed', False) and observed.get('callbacks_confirmed', False)

@@ -1,5 +1,7 @@
 # Historical experiment summaries
 
+The [update-cadence cost comparison](update-cadence-cost.md) reuses saved request usage and durations to estimate 30/60, 20/60 and 15/60-second translation/analysis schedules. It distinguishes confirmed charges from two planning assumptions and makes no new-generation or latency claim.
+
 The new [recognizer-startup trials](asr-startup-readiness.md) separately measured preparation before recording and first-text arrival in 45-second and full 325.567-second real-time replays. Both passed the six-second first-text condition at 4.236/4.206 seconds; preparation took 12.059/8.125 seconds. These were recognition-only runs with USD 0 additional API cost, not new cloud-pipeline validation.
 
 For newly executed work in this repository, see the [integrated provisional-display replay](provisional-asr-live-replay.md), [2026-10-05 ASR chunk-duration and provisional-buffer experiment](asr-chunk-duration.md), and [Audrey uncertainty-policy translation comparison](uncertain-translation-audrey.md). The integrated run supplied 325.567 seconds of saved audio in real time, completed 84 previews and all 59 translation targets, and incurred USD 0.1078795 in new confirmed API cost. Its initial preview took 20.167 seconds; later publication intervals are a separate statistic. The chunk comparison contains fresh local recognition measurements and explicitly estimated waiting; the uncertainty comparison reuses saved ASR for old/new Japanese translation. The records below remain historical.

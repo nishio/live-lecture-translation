@@ -459,6 +459,8 @@ class DemoTimeline:
         completed_at, began_at = min(outcomes, key=lambda item: item[0])
         if first_analysis['began_at'] < completed_at or at >= completed_at:
             return False
+        if self.configuration.get('parallel_cloud_stages') is True:
+            return True  # Only the first publication is ordered; later stages are independent.
         # Once a successful recorded request is admitted, the shared cloud-slot
         # state below explains the wait. A preparation failure has no admission
         # timestamp; retain a wait without manufacturing a request or ETA.
@@ -471,7 +473,7 @@ class DemoTimeline:
             interval = None
         schedule = {'state': 'idle', 'reason': 'no_pending', 'clock': 'audio' if kind == 'asr' else 'wall',
                     'interval_seconds': interval, 'wait_seconds': interval,
-                    'remaining_seconds': None, 'due_at': None, 'error': diagnostics}
+                    'remaining_seconds': None, 'due_at': None, 'waiting_for': None, 'error': diagnostics}
         if state in {'failed', 'paused'}:
             return {**schedule, 'state': 'blocked', 'reason': 'failed' if kind == 'asr' else 'manual_retry'}
         if state == 'running':
@@ -492,8 +494,21 @@ class DemoTimeline:
             return {**schedule, 'state': 'waiting', 'reason': 'initial_translation'}
         if future:
             other = self.analysis_events if kind == 'translation' else self.translation_events
-            if any(event['began_at'] <= at < event['at'] for event in other):
-                return {**schedule, 'state': 'busy', 'reason': 'shared_slot'}
+            if (self.configuration.get('parallel_cloud_stages') is not True
+                    and any(event['began_at'] <= at < event['at'] for event in other)):
+                previous = [event for event in events if event['at'] <= at]
+                finished = at >= self.capture_end and all(event['at'] <= at for event in self.asr_events)
+                if previous and interval is not None and not finished:
+                    # A busy peer is not yet a blocker while this stage's own
+                    # interval remains. Never move a recorded earlier admission
+                    # later (e.g. a manual request), or retime any publication.
+                    due = min(max(event['began_at'] for event in previous) + interval,
+                              min(event['began_at'] for event in future))
+                    if due > at:
+                        return {**schedule, 'state': 'waiting', 'reason': 'interval',
+                                'remaining_seconds': due - at, 'due_at': due}
+                return {**schedule, 'state': 'busy', 'reason': 'shared_slot',
+                        'waiting_for': 'analysis' if kind == 'translation' else 'translation'}
             due = min(event['began_at'] for event in future)
             remaining = max(0, due - at)
             return {**schedule, 'state': 'waiting' if remaining else 'due', 'reason': 'interval',

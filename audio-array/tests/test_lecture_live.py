@@ -162,7 +162,7 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(3, state['analysis']['through_seconds'])
         self.assertEqual('completed', state['asr']['state'])
         self.assertTrue(all(row.get('translation_ja') for row in state['lines']))
-        self.assertIsNone(app.cloud_worker)
+        self.assertTrue(all(worker is None for worker in app.cloud_workers.values()))
         self.assertFalse(state['processing_active'])
         self.assertTrue(state['analysis']['completion_confirmed'])
         self.assertFalse(json.loads((app.result_dir / 'state.json').read_text())['processing_active'])
@@ -356,7 +356,7 @@ class LiveTest(unittest.TestCase):
             self.assertTrue(state['analysis']['worker_alive'])
             self.assertFalse(state['analysis']['completion_confirmed'])
             self.assertTrue(app.worker.is_alive())
-            self.assertFalse(app.cloud_worker.daemon)
+            self.assertFalse(app.cloud_workers['analysis'].daemon)
             with self.assertRaises(RuntimeError):
                 app.start({'provider': 'off'}, replay=self.audio, pace=0)
         finally:

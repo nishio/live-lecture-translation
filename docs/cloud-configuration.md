@@ -20,7 +20,7 @@ For a saved-audio-only run, set `microphone_max_seconds` to `0` and list `input.
 
 The authorization JSON is authoritative for the allowed daily budget. A day not explicitly authorized has a zero allowance. Day boundaries use Japan Standard Time. Text duration and USD budget are independent limits; having room in one does not override the other. The supported cloud model labels are `gpt-6-luna` and `gpt-6.1-sol`.
 
-Keep the private authorization and accounting files out of commits. Changing authorization does not erase past use or unresolved reservations. If several intentional processes share one allowance, use one authoritative set of ledgers and a shared inference lock.
+Keep the private authorization and accounting files out of commits. Changing authorization does not erase past use or unresolved reservations. If several intentional processes share one allowance, use one authoritative set of ledgers and a shared local-inference lock.
 
 ## Supply a key
 
@@ -47,6 +47,56 @@ Without a key file, use:
 ```
 
 `--check` inspects startup prerequisites and does not start microphone recording. The regular launch opens the local dashboard; recording still requires its start action.
+
+<a id="lecture-settings"></a>
+## 更新間隔を見積もって設定する
+
+Translation and analysis intervals can be selected in an explicit JSON file. Estimate their cloud cost first; this setting is separate from authorization and the daily budget.
+
+設定を指定しない場合は、翻訳60秒・要点整理120秒のままです。間隔は各処理を開始してから次の開始判定までの時間で、画面に結果が届くまでの時間ではありません。まず、標準設定と短い間隔の費用を比較します。
+
+```sh
+./start.command --estimate --hours 6
+./start.command --estimate --settings config/lecture.example.json --hours 6
+```
+
+見積もりは保存済みの集計値を使うCPU計算で、API費用はUSD 0。Python 3があればセットアップ前でも実行でき、APIキー、音声認識モデル、モデル推論や録音は不要です。`--hours 6` は6時間分の費用計算であり、録音を6時間で止める設定ではありません。時間を省略すると1時間分を計算します。
+
+例のJSONは次の内容です。
+
+```json
+{
+  "schema_version": 1,
+  "translation_interval_seconds": 30,
+  "analysis_interval_seconds": 60
+}
+```
+
+翻訳30秒・要点整理60秒は、費用を抑えつつ間隔を短くする設定例です。基本試算は約USD 2.34/時間、6時間でUSD 14.04。標準の60/120設定の同じ方法による試算はUSD 1.30/時間、6時間でUSD 7.81です。翻訳15秒・要点整理60秒も選べます。1回の要求量も変わらないと置く別試算も表示します。これらは保証範囲ではありません。[実費と計算の仮定](experiments/update-cadence-cost.md)を確認してください。
+
+クラウド翻訳と分析はそれぞれ1件ずつ同時に実行できます。初回だけ、訳の公開または最初の試行の失敗を待ってから自動分析を開始します（翻訳対象なし・手動分析は例外）。表示する所要時間対間隔の参考比は翻訳・分析を別々に計算し、両者を足して15秒設定を不可とは判断しません。要求回数・トークン量などが同じなら費用試算の式は変わりませんが、実際には開始時刻の変化で文脈や要求回数も変わり得ます。並列実行と新しい間隔での実費・到着時間・品質は未測定です。
+
+見積もりを確認してから自分用の設定を作ります。
+
+```sh
+cp config/lecture.example.json config/lecture.json
+```
+
+`config/lecture.json` をエディタで開き、必要なら数値を変えて、もう一度見積もります。このファイルはGitの対象外です。上の3キーが必須で、`schema_version` は1、間隔は1〜3600秒の正整数で指定します。未知のキーや重複キー、小数、文字列は受け付けません。
+
+```sh
+./start.command --estimate --settings config/lecture.json --hours 6
+```
+
+適用するには、次に新しくアプリを起動するとき、設定ファイルを明示します。
+
+```sh
+./start.command --cloud --authorization config/authorization.json --settings config/lecture.json
+```
+
+キーをファイルで渡す場合は末尾に `--key-file private.env` を追加します。通常のクラウド起動でも、有効な間隔とその費用試算を表示します。`config/lecture.json` が存在するだけでは読み込まず、`--settings` の指定が必要です。実行中のアプリを再表示してもこのJSONは適用されず、編集しても実行中の設定は変わりません。現在のセッションを終えてから次回起動に適用してください。
+
+間隔を変えても送信許可や日次予算は増えません。見積額は費用の承認ではなく、既存の使用額・未確定予約も保持されます。保存済みAudrey再生を含む過去の結果は、その実行時の間隔と公開時刻のまま表示します。
 
 ## API billing and Codex subscription access
 

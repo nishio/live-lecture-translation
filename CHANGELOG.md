@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an offline interval-cost estimate and explicit JSON settings for translation and analysis. Offer a 30/60-second example, preserve 60/120 when unspecified, and keep running apps and spending authorization unchanged.
+- Run cloud translation and analysis independently, with at most one active request per stage. Preserve first-translation-before-initial-analysis ordering, per-stage retries, stop ownership and shared budget accounting; serialize cost-report updates. Saved older runs retain their original timing and identifiable historical waits.
 - Remove the returning yellow background from the latest original-source line; retain gray uncertainty, green preview updates and unchanged source records.
 - Start the first ready continuous translation before automatic analysis, without waiting the normal 60-second translation interval. Retain failure/retry and no-target exceptions, later scheduling, and historical publication times; show the first translation's waiting state in the player.
 - Prepare local speech recognition before microphone/replay audio starts, reuse the initialized model, and show preparation, cancellation and retry separately. Preserve preparation duration and actual text publication times. Check first nonempty text and sustained updates in fresh-process saved-audio trials instead of accepting a long initial blank as expected behavior.

@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "translation_interval_seconds": 30,
+  "analysis_interval_seconds": 60
+}

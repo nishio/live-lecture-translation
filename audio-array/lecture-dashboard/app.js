@@ -126,11 +126,16 @@
         || (schedule.state === 'blocked' && label === '確認が必要' ? '要確認' : label);
       return {state: schedule.state, label, compact, fraction: 0};
     }
-    const label = ({request: '生成中', shared_slot: 'ほかの処理の完了待ち', asr: '文字起こし待ち',
+    if (schedule.reason === 'shared_slot') {
+      const stage = {translation: '翻訳', analysis: '整理'}[schedule.waiting_for];
+      return {state: schedule.state, label: stage ? `${stage}の完了待ち` : 'ほかの処理の完了待ち',
+        compact: stage ? `${stage}待ち` : '順番待ち', fraction: 0};
+    }
+    const label = ({request: '生成中', asr: '文字起こし待ち',
       manual_retry: '再試行の操作待ち', disabled: 'オフ', no_source: '原文待ち', no_pending: '新しい対象待ち',
       closed: '処理停止', saved_view: '保存結果の閲覧中'})[schedule.reason]
       || ({busy: '処理中', due: '開始待ち', blocked: '確認が必要', idle: '待機', complete: '処理済み'})[schedule.state] || '状態不明';
-    const compact = ({shared_slot: '順番待ち', manual_retry: '要確認', saved_view: '保存結果', no_pending: '新着待ち'})[schedule.reason] || label;
+    const compact = ({manual_retry: '要確認', saved_view: '保存結果', no_pending: '新着待ち'})[schedule.reason] || label;
     return {state: schedule.state, label, compact, fraction: 0};
   }
 
