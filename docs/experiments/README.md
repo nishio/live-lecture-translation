@@ -1,5 +1,9 @@
 # Historical experiment summaries
 
+For the new v0.9.0-based experimental branch, see the
+[Codex subscription text-processing probe](codex-subscription.md). Its fresh
+synthetic measurements are separate from the historical results below.
+
 These records summarize development measurements made before the standalone 0.9 extraction. They contain aggregate numbers and methodology only. Source recordings, recognized speech, translations, API payloads and responses, semantic-review excerpts, screenshots, authenticated URLs, and machine-specific paths are excluded.
 
 The measurements have not been rerun as part of writing this documentation. They describe their recorded implementations and conditions; they are not a fresh clean-install certification for this repository. The private source material is not available here, so readers cannot independently reproduce content-dependent quality judgments from this release.

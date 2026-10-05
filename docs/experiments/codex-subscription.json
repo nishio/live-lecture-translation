@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-05",
+  "baseline_tag": "v0.9.0",
+  "baseline_commit": "976c4508d5ee13019f879a5aee8d0a7c9509c767",
+  "branch": "experiment/codex-subscription",
+  "fixture": "synthetic-bus-pilot-v1",
+  "cli_version": "0.159.0-alpha.12.1",
+  "requested_model": "gpt-6.1-sol",
+  "served_model_independently_confirmed": false,
+  "reasoning_effort": "low",
+  "authentication": "chatgpt",
+  "synthetic_only": true,
+  "trial_runs": 5,
+  "cli_generation_invocations": 7,
+  "completed_workloads": 4,
+  "failed_workloads": 3,
+  "unstarted_workloads_retained": 4,
+  "workloads": {
+    "translation": {
+      "completed_count": 2,
+      "elapsed_seconds": [
+        11.377663208986633,
+        11.008689042006154
+      ],
+      "min_seconds": 11.008689042006154,
+      "median_seconds": 11.193176125496393,
+      "max_seconds": 11.377663208986633,
+      "input_tokens": [
+        10460,
+        10456
+      ],
+      "output_tokens": [
+        250,
+        245
+      ],
+      "structural_validation": "passed"
+    },
+    "analysis": {
+      "completed_count": 2,
+      "elapsed_seconds": [
+        22.87821912500658,
+        23.673038750013802
+      ],
+      "min_seconds": 22.87821912500658,
+      "median_seconds": 23.27562893751019,
+      "max_seconds": 23.673038750013802,
+      "input_tokens": [
+        11167,
+        11169
+      ],
+      "output_tokens": [
+        630,
+        604
+      ],
+      "structural_validation": "passed"
+    }
+  },
+  "application_api_key_requests": 0,
+  "measured_api_cost_usd": null,
+  "subscription_allowance_consumption": "not measured",
+  "subscription_fee_allocation": "not measured",
+  "development_and_energy_cost": "not measured",
+  "tests": {
+    "python_total": 345,
+    "python_passed": 343,
+    "python_native_skipped": 2,
+    "node_ui_checks_passed": 2
+  },
+  "quality": {
+    "method": "model-assisted text spot checks against synthetic source; not human listening evaluation",
+    "translation": "numbers, negation, joint conditions, strict bound, definition, and future/non-completed status retained in both accepted outputs",
+    "analysis": "main facts retained; extension interpreted as expansion in both outputs; one headline strengthened evidence limits into limits of effects",
+    "general_quality_claim": false
+  },
+  "limits": [
+    "no live integration",
+    "no capture or ASR",
+    "no matched paid-API control",
+    "no whole-event quota test",
+    "no real quota-exhaustion or auth-expiry test",
+    "two accepted observations per workload are not a latency distribution"
+  ],
+  "reported_usage": {
+    "invocations_with_usage": 5,
+    "invocations_without_usage": 2,
+    "input_tokens_total": 53706,
+    "output_tokens_total": 1974,
+    "includes_rejected_output": true,
+    "missing_usage_is_not_zero": true
+  }
+}

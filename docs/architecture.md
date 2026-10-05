@@ -55,3 +55,12 @@ Cloud text processing is optional and requires configuration of both permitted t
 When multiple processes are intentionally run under one allowance, their authoritative accounting and inference lock must be shared. Copying a working directory must not silently duplicate that allowance. An application configuration and the already loaded runtime must agree on supported models and limits.
 
 The local HTTP interface uses authenticated access. Browser cookies are scoped by host, not port. Different cookie names prevent one local instance from overwriting another's authentication; they do not make ports a security boundary.
+
+## Isolated subscription experiment
+
+`lecture_subscription_probe.py` evaluates synthetic text using ChatGPT-authenticated
+Codex through `lecture_codex.py`. It reuses pure request builders and response
+validators without wiring Codex into the live coordinator. Each trial has its
+own process, private artifacts, completion checks, and timeout. API accounting
+and the normal capture/ASR/translation/analysis paths are unchanged. See the
+[experiment method and measurements](experiments/codex-subscription.md).

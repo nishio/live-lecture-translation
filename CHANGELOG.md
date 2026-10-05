@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — subscription experiment branch
+
+- Adds an opt-in, synthetic-text Codex subscription probe with isolated CLI
+  execution, existing translation/analysis validators, private attempt records,
+  and explicit failures/pending work. It does not change the live provider.
+- Keeps subscription token reports separate from unmeasured quota/currency
+  costs. See the [experiment](docs/experiments/codex-subscription.md).
+
 ## 0.9
 
 Initial standalone extraction of the continuous lecture translation application.
