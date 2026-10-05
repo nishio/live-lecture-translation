@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 — 2026-10-06
+
+First stable release for Apple Silicon Macs, following review of the actual Audrey parallel-processing demo. Includes the rc.1 features below and the subsequent changes in this section. Same-session recording pause/resume remains unavailable, and current-version microphone/cloud acceptance remains a documented follow-up. See the [release notes and validation scope](docs/release-1.0.md).
+
+- Record the completed 325.567-second Audrey replay at 15/60-second translation/analysis intervals, with all 59 eligible targets covered and independently overlapping generation. Keep confirmed API charges, unresolved reservations and cached results separate.
 
 - Add an offline interval-cost estimate and explicit JSON settings for translation and analysis. Offer a 30/60-second example, preserve 60/120 when unspecified, and keep running apps and spending authorization unchanged.
 - Run cloud translation and analysis independently, with at most one active request per stage. Preserve first-translation-before-initial-analysis ordering, per-stage retries, stop ownership and shared budget accounting; serialize cost-report updates. Saved older runs retain their original timing and identifiable historical waits.

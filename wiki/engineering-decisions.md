@@ -154,6 +154,10 @@ Freeze a dependency-complete candidate, including new modules and its license, b
 
 Synthetic checks and a targeted translation comparison support their measured layers; neither completes microphone-to-display acceptance. Verify capture saving, ASR and generation outcomes independently. An explicit live stop can intentionally leave pending work; successful file completion requires its planned final processing. Neither outcome should be inferred from a successful stop request. Match evidence readers to versioned request metadata: the 1.0 candidate required a verifier fix because new uncertainty reasons were incorrectly compared against the legacy six-field request shape. Retain old-format compatibility and reject changed or missing reason evidence. Track pending real capture and cloud checks explicitly in the [1.0 release notes](../docs/release-1.0.md).
 
+## Release approval preserves unfinished validation
+
+On 2026-10-06, the user reviewed the actual Audrey demo with independent cloud stages and explicitly requested commit, push and the 1.0 release. Promote the accepted implementation by updating version metadata and publishing the stable tag; do not expand scope or restart the running demo. Same-session recording pause/resume and current-version real microphone/cloud acceptance remain documented follow-ups. Release approval is a scope decision, not evidence that an unperformed check passed. Retain the measured saved-audio results, failed attempts and unresolved charges, and preserve the v0.9.0 tag.
+
 ## Project license and source-material attribution
 
 The project uses [GNU AGPL version 3 only](../LICENSE) (`AGPL-3.0-only`), except where otherwise noted, following the user's 2026-10-05 license selection. Keep both README license sections consistent. The [Audrey sample](../samples/audrey-plurality-seoul-2023/README.md) retains the source material's CC BY attribution, uncertainty and transformation notices; the application license does not replace those terms. This change is recorded after the extracted v0.9.0 baseline without moving that tag.

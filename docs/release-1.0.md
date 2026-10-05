@@ -1,6 +1,6 @@
-# Version 1.0 release candidate
+# Version 1.0 release
 
-**Status: 1.0.0-rc.1, 2026-10-06. Installation, synthetic preparation/immediate-stop checks, two fresh-process local startup trials, and an authorized saved-audio cloud replay passed. Same-session pause/resume and candidate-specific microphone/cloud acceptance remain pending.** These notes describe the release candidate and its evidence, not a completed stable 1.0 release. The `v0.9.0` baseline remains unchanged, and preparing this candidate does not switch an existing recording session to new code.
+**Status: 1.0.0, 2026-10-06.** First stable release for Apple Silicon Macs, including independent cloud translation and analysis validated in the actual Audrey saved-audio demo. Installation, synthetic preparation/immediate-stop checks, fresh-process local startup trials and saved-audio cloud replays passed. Same-session recording pause/resume is not implemented; current-version real microphone/cloud acceptance remains a follow-up. Release approval does not mark those checks as passed. The `v0.9.0` baseline and running sessions remain unchanged.
 
 ## Scope
 
@@ -29,7 +29,7 @@ The project uses [AGPL-3.0-only](../LICENSE), except where otherwise noted. The 
 
 The [changelog](../CHANGELOG.md) contains the complete change list.
 
-## Evidence and candidate validation
+## Evidence and validation
 
 | Check or experiment | Observed result | What it establishes |
 | --- | --- | --- |
@@ -57,14 +57,16 @@ See the [development validation record](../wiki/log.md), [integrated replay meas
 
 The experiments' confirmed API costs are separate from the earlier USD 0.178775 unresolved reservation and the 2026-10-06 replay's USD 0.56391 of new unresolved reservations. Neither is a confirmed charge. Development-assistant usage and electricity were not measured. The [duration-based cost table](../README.md#cost-by-lecture-duration) is a historical extrapolation, not a current quote or a completion guarantee.
 
-## Acceptance before a stable 1.0 announcement
+<a id="acceptance-before-a-stable-10-announcement"></a>
 
-Historical multi-hour use is already recorded above. Candidate acceptance verifies the changed behavior rather than claiming there has never been live testing. The user-defined live stop ends new work at a useful reading boundary; it must preserve pending work instead of requiring final translation and analysis. Same-session pause/resume and real microphone/cloud acceptance remain pending. A successful stop request alone does not confirm capture saving or the outcome of a previously dispatched request.
+## Validation status and follow-up work
+
+Historical multi-hour use is already recorded above. The following table preserves completed checks and outstanding work at the time of the 1.0 release; approval of the release does not expand the measured evidence. The user-defined live stop ends new work at a useful reading boundary; it must preserve pending work instead of requiring final translation and analysis. Same-session pause/resume and real microphone/cloud acceptance remain pending. A successful stop request alone does not confirm capture saving or the outcome of a previously dispatched request.
 
 | Status | Check | Evidence required |
 | --- | --- | --- |
 | Passed | Freeze the candidate | The current display identity is recorded below, separately from earlier runtime identities. The change contains only application code, synthetic tests and documentation; source records, saved results, public sample text and `v0.9.0` are unchanged. |
-| Passed, synthetic | Candidate regression checks | Yellow-background follow-up: 541 Python tests in 110.093 seconds, with 539 passed and two opt-in native capture tests skipped; both Node UI suites passed. Preview revisions preserve earlier reading position and focus; returning to latest works even without new text. |
+| Passed, synthetic | Final release regression checks | 576 CPU-only Python tests in 121.158 seconds, with 574 passed and two opt-in native capture tests skipped; both Node UI suites passed. Includes independent cloud workers, budget accounting, first-translation ordering, immediate stop and saved playback. No real capture, inference or paid API request. |
 | Passed, same Mac | Clean-environment installation | Apple M1 Pro (MacBookPro18,1), macOS 15.1.1, Python 3.14.7; independent fresh checkout, virtual environment and caches. Setup, dependency check, model download, decoder, module imports, native-helper compilation and local startup preflight passed. This is not a second-Mac validation or a cloud-authentication test. |
 | Passed, synthetic | Immediate live stop | Regression checks cover no new ASR/cloud work after stop during preparation, lock waits, offline waiting and retry delay; saved output, pending targets and existing request accounting survive. Already active work may finish; natural file completion still drains. Real microphone acceptance remains separate. |
 | Passed, saved audio | Integrated provisional display and cloud replay | Real-time supply of the approved 325.567-second recording completed capture storage, canonical recognition, provisional recognition, translation and analysis. The prepared-startup follow-up verified all 22 canonical PCM chunks and 87 preview windows, all 59 eligible translation targets, recorded publication/rewind behavior and two new requests' confirmed cost. Four translation and four analysis cache hits remain explicit; the earlier cold-start run is separate. Microphone and semantic acceptance are separate. |
@@ -75,7 +77,9 @@ Historical multi-hour use is already recorded above. Candidate acceptance verifi
 
 The latest display follow-up restores the full accumulated canonical text to the same scroll area and keeps one replaceable preview tail. Existing grouping of adjacent identical uncertain lines remains in place; all source records stay saved. It supersedes the earlier 「前の認識を見る」 grouping. Historical disclosure observations and measurements above remain unchanged; this presentation change requires no ASR or API rerun.
 
-Current parallel-cloud/settings code identity: `05d411cec042ed1bc9ad72d7567653687f875d1fc95e1bbd8b752cf7e3ff3310`, across 69 source/test/setup/settings files, using the sorted-record method below with `config/lecture.example.json` included. 576 CPU-only Python tests completed in 117.401 seconds: 574 passed and two opt-in native tests skipped; both Node UI suites passed. Browser checks showed simultaneous translation/analysis generation in an isolated synthetic saved-result view. Those implementation checks retained the old Audrey view and did not run recognition or paid API requests. The separately authorized 2026-10-06 replay then exercised this unchanged code with actual saved audio and independent cloud workers; its measurements and unresolved charges are recorded above. Estimates remain separate from measured costs.
+Final 1.0 release source identity: `f8502b8623bd1f443b2c98d2cdb8fda2ad608aab466b35b8db87340b93810ba0`, across the same 69 source/test/setup/settings files. Only `VERSION` changed from the code used for the actual parallel Audrey replay (`1.0.0-rc.1` to `1.0.0`); application behavior, dependencies and tests are identical. Final regression on this source completed 576 CPU-only Python tests in 121.158 seconds: 574 passed and two opt-in native tests skipped. Both Node UI suites passed. No real capture, model inference or paid API request ran.
+
+Pre-release parallel-cloud/settings code identity: `05d411cec042ed1bc9ad72d7567653687f875d1fc95e1bbd8b752cf7e3ff3310`, across 69 source/test/setup/settings files, using the sorted-record method below with `config/lecture.example.json` included. 576 CPU-only Python tests completed in 117.401 seconds: 574 passed and two opt-in native tests skipped; both Node UI suites passed. Browser checks showed simultaneous translation/analysis generation in an isolated synthetic saved-result view. Those implementation checks retained the old Audrey view and did not run recognition or paid API requests. The separately authorized 2026-10-06 replay then exercised this unchanged code with actual saved audio and independent cloud workers; its measurements and unresolved charges are recorded above. Estimates remain separate from measured costs.
 
 Previous yellow-background display code identity: `132309c22e20eb54dc88ca3ef62ee4c4b43b1e95421dac8aefef38cad06c5d73`, across 63 source/test/setup files. Removed the latest-line and focus-triggered yellow backgrounds while preserving uncertainty, keyboard focus outlines and source evidence. In the existing saved-result browser, the previously yellow line at 16.5 seconds had no background or inset stripe after the change, including when focused; new publications and backward seeking retained that behavior. No ASR or API generation was rerun. The initial full regression exposed an old test assumption that translation always ends after the failed request and its retry; the corrected test permits fresh remaining-source batches while verifying the frozen retry, retry-budget reset and ordered exactly-once coverage.
 
@@ -97,7 +101,7 @@ Earlier frozen candidate code identity, before immediate-stop changes: `665d30db
 
 Direct dependencies installed were NumPy 2.5.3, MLX 0.32.2, MLX Whisper 0.4.3, Hugging Face Hub 2.0.0 and imageio-ffmpeg 0.6.0. The decoder reports FFmpeg 7.1. The freshly downloaded model used revision `a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb`; its 1,613,977,612-byte weights have SHA-256 `951ed3fc1203e6a62467abb2144a96ce7eafca8fa77e3704fdb8635ff3e7f8a6`. Setup did not load the model for recognition. Additional application API cost for these candidate checks was USD 0; development-assistant usage and electricity were not measured.
 
-Perform acceptance in an isolated candidate instance between sessions, preserving existing applications, recordings, results, shared ledgers and inference locks. Keep private evidence under ignored `data/` or `results/`; publish only permitted aggregates. Failed or unfinished checks stay recorded as such. Add the final source identity and actual results here before promoting the candidate to stable 1.0.
+Perform the remaining real-use checks in an isolated instance between sessions, preserving existing applications, recordings, results, shared ledgers and inference locks. Keep private evidence under ignored `data/` or `results/`; publish only permitted aggregates. Failed or unfinished checks stay recorded as such.
 
 ## Known limits
 
@@ -109,4 +113,4 @@ Perform acceptance in an isolated candidate instance between sessions, preservin
 - Historical multi-hour Mac microphone use exposed input loss and unfinished cloud work. Reliable completion of long sessions remains unresolved; the candidate's short acceptance run cannot establish it. Mac battery endurance, lid-closed operation, accuracy in difficult acoustics, recovery performance and improved comprehension while listening remain unmeasured.
 - Windows, Linux and Intel Macs are outside the validated platform scope. Local LLM translation and analysis are available through Ollama, but the evaluated default `qwen3:4b` configuration did not provide adequate semantic quality for the reference workflow.
 
-The final release description must retain the limits that remain after acceptance. See [operation](operation.md) and [architecture](architecture.md) for processing and recovery details.
+These limits remain part of the 1.0 release. See [operation](operation.md) and [architecture](architecture.md) for processing and recovery details.
