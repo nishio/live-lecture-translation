@@ -1,5 +1,9 @@
 # Historical experiment summaries
 
+The [Audrey Luna/Sol subscription comparison](audrey-luna-subscription.md)
+records faster Luna responses alongside a rejected translation and semantic
+limitations; it is a separate saved-text experiment, not a live provider switch.
+
 For the new v0.9.0-based experimental branch, see the
 [Codex subscription text-processing probe](codex-subscription.md). Its fresh
 synthetic measurements are separate from the historical results below.

@@ -7,6 +7,10 @@ median was 36.564 seconds. The sequential processing loop took 197.406 seconds.
 Quality review identified qualification loss in one analysis headline, recurring
 term inconsistency, and a misleading fragment risk caused by uncertainty filtering.
 
+The subsequent [Luna comparison](audrey-luna-subscription.md) used the same nine
+application requests and returned faster, but rejected one translation and
+exposed semantic/source-reference errors in some accepted outputs.
+
 This is the real-source follow-up to the [synthetic subscription probe](codex-subscription.md).
 The user explicitly requested the existing Audrey data on 2026-10-05. Work stays
 on `experiment/codex-subscription`, derived from v0.9.0; the live application

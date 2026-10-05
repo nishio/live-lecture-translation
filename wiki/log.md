@@ -1,5 +1,28 @@
 # Wiki log
 
+## [2026-10-05] experiment | Audrey with Luna low
+
+At the user's request, evaluated `gpt-6-luna` with the same frozen nine
+application requests and low reasoning used for Sol. The ordinary replay
+stopped after one accepted and one rejected translation. Preserved that failed
+report and its 41 pending rows. Tested the other seven inputs once each in a
+separate diagnostic batch; no original attempt was retried or relabeled.
+
+Five translations and three analyses passed structural validation; one
+nine-target translation was rejected for group changes and missing IDs.
+Accepted translation coverage is 38/47. The same five accepted translation
+requests had Luna/Sol medians 8.525/11.943 seconds; three analyses had medians
+19.693/36.564 seconds. Recorded the rejection's time/usage separately from valid
+completion and retained semantic omissions, wrong source attribution, unsupported
+negation and mislabeled concept provenance found by two reviewers.
+
+All nine invocations reported usage: 100,422 input and 4,199 output tokens,
+including the rejection. No application API-key requests were made; currency,
+subscription allowance percentage, development and energy are unmeasured.
+Updated experiment documents, the topic, index and log. No application code,
+main checkout, live model selection, capture or ASR changed. Only aggregate
+measurements and reusable findings enter Git; generated outputs stay ignored.
+
 ## [2026-10-05] file back | Evidence before latency explanations
 
 Distilled the subscription/API conversation into three reusable rules in

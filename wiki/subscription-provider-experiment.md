@@ -119,3 +119,27 @@ an observed runtime slowdown from an unmeasured causal explanation. Further
 optimization should measure startup/auth, response wait and generation
 separately; it should not assume that removing agentic iteration helps when
 the accepted trials contain no such iteration.
+
+## Luna model comparison
+
+The authorized [Luna comparison](../docs/experiments/audrey-luna-subscription.md)
+changed only the requested model to `gpt-6-luna`, retaining low reasoning and all
+nine frozen application requests. The normal replay stopped on its second
+translation: it split prescribed groups and dropped two target IDs. Its failed
+status and pending work remain unchanged. Seven unstarted inputs were tested
+once in a separate diagnostic batch; none of the original attempts was retried.
+
+Across both executions, five of six translation responses and all three
+analyses passed structural validation. Accepted translations cover 38 of 47
+eligible rows; the nine-row rejected request is still unaccepted. All-response
+translation median was 8.420 seconds versus Sol 13.818, but includes the rejection.
+For the same five accepted requests, medians were 8.525 versus 11.943 seconds
+(28.6% shorter); analysis medians were 19.693 versus 36.564 (46.1% shorter).
+
+Speed did not establish an equivalent replacement. Review found omitted source
+content, text moved under the wrong source IDs, an unsupported negative/causal
+connection, and a background definition labeled as lecture evidence. Some of
+these passed the existing validator. Keep structural compliance and semantic
+fidelity as separate acceptance criteria, and never treat a rejected short
+response as faster successful completion. Future prompt/schema experiments
+must preserve this baseline and its failure evidence. No live model was switched.

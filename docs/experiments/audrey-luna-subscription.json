@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-05",
+  "experiment": "Audrey gpt-6-luna low subscription comparison",
+  "code_commit": "526a927",
+  "baseline_tag": "v0.9.0",
+  "requested_model": "gpt-6-luna",
+  "reasoning_effort": "low",
+  "served_model_independently_confirmed": false,
+  "cli_version": "0.159.0-alpha.12.1",
+  "auth_mode": "chatgpt",
+  "source": {
+    "sample": "audrey-plurality-seoul-2023",
+    "speaker": "Audrey Tang",
+    "publisher": "Code for Japan",
+    "source_url": "https://www.youtube.com/watch?v=4_tge6XJhGA",
+    "license_notice": "CC BY; version not specified in saved source metadata",
+    "transcript_sha256": "78cf9ca665c668e24038bdffa145f3c21ed2e611d6205f2b07c1f587c19edc81",
+    "audio_duration_seconds": 325.567,
+    "last_source_end_seconds": 324.54,
+    "recognized_rows": 62,
+    "uncertain_rows": 15,
+    "eligible_translation_rows": 47
+  },
+  "all_nine_application_requests_equal_sol": true,
+  "status": "diagnostics_complete_with_one_rejected_output",
+  "original_replay": {
+    "status": "failed",
+    "calls_started": 2,
+    "calls_completed": 1,
+    "calls_rejected": 1,
+    "calls_unstarted": 7,
+    "covered_rows": 6,
+    "pending_rows": 41,
+    "unchanged_after_diagnostics": true
+  },
+  "supplemental_diagnostics": {
+    "requests": 7,
+    "accepted": 7,
+    "rejected": 0,
+    "original_tasks_retried": 0,
+    "application_retry": false
+  },
+  "combined_observations": {
+    "invocations": 9,
+    "accepted": 8,
+    "rejected": 1,
+    "unattempted_unique_requests": 0,
+    "accepted_translation_calls": 5,
+    "rejected_translation_calls": 1,
+    "accepted_translation_blocks": 10,
+    "eligible_translation_rows": 47,
+    "accepted_translation_rows": 38,
+    "rows_in_rejected_request": 9,
+    "completed_lecture_replay": false,
+    "accepted_analysis_calls": 3
+  },
+  "calls": [
+    {
+      "sequence": 1,
+      "kind": "translation",
+      "cutoff_seconds": 60.0,
+      "status": "completed",
+      "source_count": 17,
+      "target_count": 6,
+      "elapsed_seconds": 8.525009665987454,
+      "provider_elapsed_seconds": 8.50679325000965,
+      "structural_validation": "passed",
+      "block_count": 2,
+      "usage": {
+        "input_tokens": 10504,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 250,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 11.94331274999422,
+      "application_request_matches_sol": true
+    },
+    {
+      "sequence": 2,
+      "kind": "translation",
+      "cutoff_seconds": 120.0,
+      "status": "failed",
+      "source_count": 24,
+      "target_count": 9,
+      "elapsed_seconds": 8.315488332998939,
+      "provider_elapsed_seconds": 8.29146445900551,
+      "usage": {
+        "input_tokens": 11007,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 277,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 19.78162575000897,
+      "application_request_matches_sol": true
+    },
+    {
+      "sequence": 3,
+      "kind": "analysis",
+      "cutoff_seconds": 120.0,
+      "status": "completed",
+      "source_count": 15,
+      "target_count": 0,
+      "elapsed_seconds": 19.693407666985877,
+      "provider_elapsed_seconds": 19.674828874995,
+      "structural_validation": "passed",
+      "summary_count": 4,
+      "concept_count": 1,
+      "usage": {
+        "input_tokens": 11598,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 885,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 36.56422112500877,
+      "application_request_matches_sol": true
+    },
+    {
+      "sequence": 4,
+      "kind": "translation",
+      "cutoff_seconds": 180.0,
+      "status": "completed",
+      "source_count": 14,
+      "target_count": 6,
+      "elapsed_seconds": 11.253875750000589,
+      "provider_elapsed_seconds": 11.232692582998425,
+      "structural_validation": "passed",
+      "block_count": 2,
+      "usage": {
+        "input_tokens": 10355,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 234,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 11.58037474998855,
+      "application_request_matches_sol": true
+    },
+    {
+      "sequence": 5,
+      "kind": "translation",
+      "cutoff_seconds": 240.0,
+      "status": "completed",
+      "source_count": 17,
+      "target_count": 9,
+      "elapsed_seconds": 7.940525249985512,
+      "provider_elapsed_seconds": 7.911500000016531,
+      "structural_validation": "passed",
+      "block_count": 3,
+      "usage": {
+        "input_tokens": 10549,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 264,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 20.149562125006923,
+      "application_request_matches_sol": true
+    },
+    {
+      "sequence": 6,
+      "kind": "analysis",
+      "cutoff_seconds": 240.0,
+      "status": "completed",
+      "source_count": 24,
+      "target_count": 0,
+      "elapsed_seconds": 17.975838249985827,
+      "provider_elapsed_seconds": 17.952391166996676,
+      "structural_validation": "passed",
+      "summary_count": 3,
+      "concept_count": 2,
+      "usage": {
+        "input_tokens": 12439,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 751,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 34.220697834010934,
+      "application_request_matches_sol": true
+    },
+    {
+      "sequence": 7,
+      "kind": "translation",
+      "cutoff_seconds": 300.0,
+      "status": "completed",
+      "source_count": 21,
+      "target_count": 13,
+      "elapsed_seconds": 10.887949625001056,
+      "provider_elapsed_seconds": 10.849720083002467,
+      "structural_validation": "passed",
+      "block_count": 2,
+      "usage": {
+        "input_tokens": 10787,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 357,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 15.692620582995005,
+      "application_request_matches_sol": true
+    },
+    {
+      "sequence": 8,
+      "kind": "translation",
+      "cutoff_seconds": 325.567,
+      "status": "completed",
+      "source_count": 15,
+      "target_count": 4,
+      "elapsed_seconds": 6.786884833010845,
+      "provider_elapsed_seconds": 6.771517832996324,
+      "structural_validation": "passed",
+      "block_count": 1,
+      "usage": {
+        "input_tokens": 10313,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 155,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 9.758016292005777,
+      "application_request_matches_sol": true
+    },
+    {
+      "sequence": 9,
+      "kind": "analysis",
+      "cutoff_seconds": 325.567,
+      "status": "completed",
+      "source_count": 29,
+      "target_count": 0,
+      "elapsed_seconds": 22.558797250007046,
+      "provider_elapsed_seconds": 22.547117125010118,
+      "structural_validation": "passed",
+      "summary_count": 3,
+      "concept_count": 2,
+      "usage": {
+        "input_tokens": 12870,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1026,
+        "reasoning_output_tokens": 0
+      },
+      "sol_elapsed_seconds": 37.68898316702689,
+      "application_request_matches_sol": true
+    }
+  ],
+  "timing": {
+    "translation": {
+      "all_attempts_count": 6,
+      "includes_rejected": true,
+      "all_min_seconds": 6.786884833010845,
+      "all_median_seconds": 8.420248999493197,
+      "all_max_seconds": 11.253875750000589,
+      "sol_all_median_seconds": 13.817966666494613,
+      "all_median_reduction_percent": 39.06303870373083,
+      "accepted_count": 5,
+      "accepted_median_seconds": 8.525009665987454,
+      "sol_matching_accepted_median_seconds": 11.94331274999422,
+      "accepted_median_reduction_percent": 28.62106314689298
+    },
+    "analysis": {
+      "all_attempts_count": 3,
+      "includes_rejected": false,
+      "all_min_seconds": 17.975838249985827,
+      "all_median_seconds": 19.693407666985877,
+      "all_max_seconds": 22.558797250007046,
+      "sol_all_median_seconds": 36.56422112500877,
+      "all_median_reduction_percent": 46.1402238005934,
+      "accepted_count": 3,
+      "accepted_median_seconds": 19.693407666985877,
+      "sol_matching_accepted_median_seconds": 36.56422112500877,
+      "accepted_median_reduction_percent": 46.1402238005934
+    }
+  },
+  "reported_usage": {
+    "input_tokens": 100422,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 4199,
+    "reasoning_output_tokens": 0
+  },
+  "sum_of_call_elapsed_seconds": 113.93777662396315,
+  "application_api_key_requests": 0,
+  "measured_api_cost_usd": null,
+  "subscription_allowance_consumption": "not measured",
+  "subscription_fee_allocation": "not measured",
+  "development_and_energy_cost": "not measured",
+  "quality_evaluation": "model-assisted saved-source/output review; not audio or human reference",
+  "known_findings": [
+    "rejected second translation splits prescribed groups and omits two target source IDs",
+    "accepted translation omits a source term",
+    "accepted translation moves content to a block with different source IDs and omits another source clause",
+    "analysis introduces an unsupported negative and strengthens a causal link across incomplete input",
+    "final analysis labels a background term definition as lecture evidence",
+    "recurring term rendering varies across calls"
+  ],
+  "limits": [
+    "One run per model, not a contemporaneous randomized benchmark.",
+    "Original replay stopped after validation rejection; later calls are separate diagnostics, not a successful resumed replay.",
+    "Rejected-output timing is not time to a valid translation.",
+    "CLI startup, authentication, remote generation and local persistence are not timed separately.",
+    "Sum of call times excludes the manual diagnostic gap and is not wall-clock replay completion.",
+    "Accepted structural validation does not establish semantic fidelity.",
+    "Historical API analysis windows differ.",
+    "No routine CPU tests were run concurrently by this task; other desktop work was not isolated."
+  ]
+}
