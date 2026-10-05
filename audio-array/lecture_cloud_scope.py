@@ -168,7 +168,7 @@ class CloudScope:
         microphone_date = _iso_date(raw.get('microphone_date'), 'マイク録音の許可')
         if microphone_date not in dates:
             raise CloudScopeError('マイク録音の許可日が送信許可日と一致しません。')
-        maximum = _number(raw.get('microphone_max_seconds'), 'マイク録音の許可秒数', positive=True)
+        maximum = _number(raw.get('microphone_max_seconds'), 'マイク録音の許可秒数')
         if maximum > MAX_MICROPHONE_SECONDS:
             raise CloudScopeError('マイク録音の許可は累計6時間を超えられません。')
         if not isinstance(sources, list):
@@ -205,6 +205,8 @@ class CloudScope:
         kind = session.get('source_kind')
         record = {'source_kind': kind, 'started_at': started, 'recording_date': started_date}
         if kind == 'microphone':
+            if authorized['microphone_max_nanoseconds'] == 0:
+                raise CloudScopeError('マイク録音の本文送信は許可されていません。')
             if started_date != authorized['microphone_date']:
                 raise CloudScopeError('このマイク録音日は本文送信の許可範囲外です。録音自体は継続できます。')
             # A recording crossing midnight is not entirely on the approved day.
@@ -271,7 +273,7 @@ class CloudScope:
         send_authorized = today in authorized['allowed_dates']
         return {'checked_at': now, 'allowed_dates': authorized['allowed_dates'],
                 'microphone_date': authorized['microphone_date'],
-                'authorized_today': send_authorized and today == authorized['microphone_date'],
+                'authorized_today': send_authorized and today == authorized['microphone_date'] and maximum > 0,
                 'send_authorized_today': send_authorized,
                 'max_seconds': maximum / NANOSECONDS, 'used_seconds': used / NANOSECONDS,
                 'remaining_seconds': max(0, maximum - used) / NANOSECONDS,
@@ -313,7 +315,7 @@ class CloudScope:
             used = sum(record['max_through_nanoseconds'] for record in ledger['sessions'].values() if record['source_kind'] == 'microphone')
             delta = increase if source['source_kind'] == 'microphone' else 0
             total = used + delta
-            if total > authorized['microphone_max_nanoseconds']:
+            if source['source_kind'] == 'microphone' and total > authorized['microphone_max_nanoseconds']:
                 hours = authorized['microphone_max_nanoseconds'] / (3600 * NANOSECONDS)
                 raise CloudScopeError(f'マイク録音の本文送信が共有の累計{hours:g}時間の許可範囲を超えます。録音は停止しません。')
             ledger['sessions'][identity] = {**source, 'max_through_nanoseconds': maximum,
@@ -324,7 +326,7 @@ class CloudScope:
                 'authorized_date': today, 'through_seconds': through / NANOSECONDS,
                 'session_reserved_seconds': maximum / NANOSECONDS,
                 'delta_seconds': delta / NANOSECONDS, 'microphone_reserved_seconds': total / NANOSECONDS,
-                'microphone_remaining_seconds': (authorized['microphone_max_nanoseconds'] - total) / NANOSECONDS,
+                'microphone_remaining_seconds': max(0, authorized['microphone_max_nanoseconds'] - total) / NANOSECONDS,
                 'authorization_sha256': authorized['authorization_sha256'], 'ledger_path': str(self.ledger_path)}
         except OSError as exc:
             raise CloudScopeError('送信範囲の予約を保存できません。クラウド送信は開始しません。') from exc

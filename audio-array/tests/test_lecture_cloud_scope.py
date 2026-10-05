@@ -66,7 +66,7 @@ class CloudScopeTests(unittest.TestCase):
         cases = [('allowed_dates', ['not-a-date']), ('allowed_dates', []), ('allowed_dates', ['2030-06-04', '2030-06-04']),
                  ('allowed_models', ['other-model']), ('allowed_models', ['gpt-6-luna', 'gpt-6-luna']),
                  ('microphone_date', '2030-06-05'), ('microphone_max_seconds', 21601),
-                 ('microphone_max_seconds', True), ('microphone_max_seconds', 0), ('replay_sources', None),
+                 ('microphone_max_seconds', True), ('microphone_max_seconds', -1), ('replay_sources', None),
                  ('replay_sources', [{'path': 'relative.wav', 'sha256': '0' * 64}]),
                  ('replay_sources', [{'path': str(self.audio), 'sha256': 'not-a-sha'}])]
         for field, value in cases:
@@ -81,6 +81,46 @@ class CloudScopeTests(unittest.TestCase):
         with self.assertRaises(CloudScopeError): self.scope()
         self.auth_path.write_text('{"human_approved":true,"x":NaN}')
         with self.assertRaises(CloudScopeError): self.scope()
+
+    def test_zero_microphone_allowance_authorizes_only_listed_replay(self):
+        self.authorization['microphone_max_seconds'] = 0
+        self.write_auth()
+        scope = self.scope()
+        status = scope.status()
+        self.assertFalse(status['authorized_today'])
+        self.assertTrue(status['send_authorized_today'])
+        self.assertEqual((0, 0, 0), tuple(status[key]
+                         for key in ('max_seconds', 'used_seconds', 'remaining_seconds')))
+        self.assertTrue(status['quota_exhausted'])
+        for duration in (0, .000000001, 60):
+            with self.subTest(duration=duration), self.assertRaisesRegex(CloudScopeError, '許可されていません'):
+                scope.reserve(self.microphone(), 'gpt-6-luna', duration)
+        self.assertFalse(scope.ledger_path.exists())
+        receipt = scope.reserve(self.replay(), 'gpt-6-luna', 2400)
+        self.assertEqual(receipt['session_reserved_seconds'], 2400)
+        self.assertEqual(receipt['microphone_reserved_seconds'], 0)
+        self.assertEqual(receipt['microphone_remaining_seconds'], 0)
+        unlisted = self.root / 'unlisted.wav'
+        unlisted.write_bytes(self.audio.read_bytes())
+        with self.assertRaisesRegex(CloudScopeError, '許可リスト'):
+            scope.reserve({**self.replay('unlisted'), 'replay_path': str(unlisted)}, 'gpt-6-luna', 60)
+        self.audio.write_bytes(b'synthetic changed hash')
+        with self.assertRaisesRegex(CloudScopeError, 'SHA'):
+            scope.reserve(self.replay(), 'gpt-6-luna', 2400)
+
+    def test_zero_microphone_revocation_preserves_reservations_and_replay_permission(self):
+        scope = self.scope()
+        scope.reserve(self.microphone(), 'gpt-6-luna', 60)
+        before = json.loads(scope.ledger_path.read_text())['sessions']['mic-1']
+        self.authorization['microphone_max_seconds'] = 0
+        self.write_auth()
+        with self.assertRaisesRegex(CloudScopeError, '許可されていません'):
+            scope.reserve(self.microphone(), 'gpt-6-luna', 60)
+        receipt = scope.reserve(self.replay(), 'gpt-6-luna', 2400)
+        self.assertEqual(receipt['microphone_reserved_seconds'], 60)
+        self.assertEqual(receipt['microphone_remaining_seconds'], 0)
+        self.assertEqual(before, json.loads(scope.ledger_path.read_text())['sessions']['mic-1'])
+        self.assertEqual(scope.status()['used_seconds'], 60)
 
     def test_same_microphone_session_only_reserves_growth(self):
         scope = self.scope()

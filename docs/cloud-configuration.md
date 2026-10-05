@@ -12,6 +12,8 @@ cp config/authorization.example.json config/authorization.json
 
 Review the JSON and set its fields for your own use. The example starts with `human_approved: false`, a `YYYY-MM-DD` date placeholder, and a zero budget. Set the allowed date, a daily USD limit, and a microphone-text allowance no greater than six hours. Set approval to true only after reviewing the transmission scope and limit. Do not reuse another person's working authorization.
 
+For a saved-audio-only run, set `microphone_max_seconds` to `0` and list the exact input path and SHA256 under `replay_sources`. Zero disables every microphone-text request, including an empty one, while preserving explicitly authorized replay. Existing microphone reservations remain in the ledger when this allowance is disabled.
+
 The authorization JSON is authoritative for the allowed daily budget. A day not explicitly authorized has a zero allowance. Day boundaries use Japan Standard Time. Text duration and USD budget are independent limits; having room in one does not override the other. The supported cloud model labels are `gpt-6-luna` and `gpt-6.1-sol`.
 
 Keep the private authorization and accounting files out of commits. Changing authorization does not erase past use or unresolved reservations. If several intentional processes share one allowance, use one authoritative set of ledgers and a shared inference lock.
@@ -35,6 +37,14 @@ Without a key file, use:
 ```
 
 `--check` inspects startup prerequisites and does not start microphone recording. The regular launch opens the local dashboard; recording still requires its start action.
+
+## API billing and Codex subscription access
+
+Version 0.9 calls the OpenAI API through its existing API-key adapter. A ChatGPT subscription does not change that adapter's billing. Codex separately supports ChatGPT sign-in for subscription access and API-key sign-in for usage-based access; see the official [authentication guide](https://learn.chatgpt.com/docs/auth).
+
+There is a supported programmatic route to evaluate: [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode) reuses saved CLI authentication, the [SDK](https://learn.chatgpt.com/docs/codex-sdk) controls local agents, and [app-server](https://learn.chatgpt.com/docs/app-server) supports custom clients. These documents were checked on 2026-10-05. For personal local use, authenticate through the supported Codex client; do not substitute a ChatGPT credential into this application's API-key field.
+
+The lecture application has no Codex adapter yet. Subscription-backed processing would require a separate integration and checks for model availability, remaining allowance, structured output, latency, source provenance, cancellation, and recovery. Included allowance is not unlimited, and no full-event capacity or savings amount has been established here. Keep subscription usage separate from the USD API ledger. See the [proposed comparison](../wiki/live-and-review-pipeline.md#subscription-access-as-a-provider-candidate), starting with post-lecture text processing. No authentication or billing settings have been changed.
 
 ## Read cost state accurately
 
