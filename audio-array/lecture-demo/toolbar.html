@@ -1,6 +1,10 @@
-<section class="demo-toolbar" aria-label="保存結果の時系列デモ">
-  <div class="demo-heading"><div><strong id="demo-heading">保存結果の表示再現 · 再表示API $0</strong><p id="demo-source">保存記録を確認しています</p></div><details class="demo-notes"><summary>記録・費用について</summary><p id="demo-cost"></p><p id="demo-timing"></p><p>表示操作では録音・ASR・API送信を実行しません。音声再生もありません。AIによる認識や訳には誤りが含まれます。</p></details></div>
-  <div class="demo-controls"><button id="demo-play" type="button" disabled>▶ 表示を再生</button><label class="demo-slider-label" for="demo-slider">表示時点 <output id="demo-position">—</output><span id="demo-loading" role="status" hidden></span></label><input id="demo-slider" type="range" min="0" max="1" step="0.001" value="0" aria-label="表示する当時の経過時間" disabled><label class="demo-speed-label">速度<select id="demo-speed"><option value="1">1×</option><option value="4" selected>4×</option><option value="12">12×</option></select></label></div>
-  <div class="demo-bottom"><div id="demo-landmarks" class="demo-landmarks" aria-label="代表時点"></div><span id="demo-progress"></span></div>
+<section class="demo-toolbar" aria-label="保存記録の再生">
+  <div class="demo-controls">
+    <button id="demo-play" type="button" aria-pressed="false" disabled>▶ 再生</button>
+    <button id="demo-restart" type="button" disabled>最初から</button>
+    <output id="demo-position" aria-live="off">0:00</output>
+    <input id="demo-slider" type="range" min="0" max="1" step="any" value="0" aria-label="再生位置" disabled>
+  </div>
+  <audio id="demo-audio" preload="metadata" hidden></audio>
   <p id="demo-error" role="alert" hidden></p>
 </section>

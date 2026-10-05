@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
+import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lecture_demo import DemoTimeline, DemoDataError, make_server
@@ -40,6 +41,61 @@ class DemoTests(unittest.TestCase):
 
     def write(self, name, value): (self.directory / name).write_text(json.dumps(value))
     def write_rows(self, name, rows): (self.directory / name).write_text(''.join(json.dumps(row) + '\n' for row in rows))
+
+    def continuous_fixture(self):
+        """Two translation publications; the last arrives after audio/analysis."""
+        state = json.loads((self.directory / 'state.json').read_text())
+        extra = [{'id': 'uncertain', 'text': 'unclear', 'start_seconds': 15, 'end_seconds': 16, 'language': 'en', 'uncertain': True},
+                 {'id': 'native', 'text': '日本語', 'start_seconds': 16, 'end_seconds': 17, 'language': 'ja'}]
+        state['lines'].extend(extra)
+        state['session']['title'] = 'Synthetic saved lecture'
+        self.transcripts[1]['lines'].extend(extra)
+        first = {'id': 'tr-one', 'text': 'first block', 'source_ids': ['one'], 'start_seconds': 0,
+                 'end_seconds': 10, 'generated_at': 900, 'published_at': 1018}
+        second = {'id': 'tr-two', 'text': 'second block', 'source_ids': ['two'], 'start_seconds': 10,
+                  'end_seconds': 20, 'generated_at': 1034, 'published_at': 1035}
+        state['translation'] = {'enabled': True, 'state': 'completed', 'blocks': [first, second]}
+        self.write('state.json', state)
+        self.write('runtime-manifest.json', {'configuration': {'analysis_interval': 90, 'translation_interval': 60,
+                                                               'chunk_seconds': 10, 'pace': 1}})
+        histories = [{'started_at': 1015, 'published_at': 1018, 'blocks': [first]},
+                     {'started_at': 1031, 'published_at': 1035, 'blocks': [second]}]
+        measured = [{'stage': 'translation', 'started_at': row['started_at'], 'published_at': row['published_at'],
+                     'processing_seconds': row['published_at'] - row['started_at'], 'through_seconds': block['end_seconds'],
+                     'target_source_ids': block['source_ids']} for row, block in zip(histories, [first, second])]
+        results = deepcopy(self.results)
+        for row in results:
+            row['translations'] = []
+        self.write_rows('transcript.jsonl', self.transcripts)
+        self.write_rows('analysis-history.jsonl', results)
+        self.write_rows('translation-history.jsonl', histories)
+        self.write_rows('measurements.jsonl', self.measurements + measured)
+        return histories, measured
+
+    def wav_fixture(self, seconds=20, rate=16000, channels=1):
+        path = self.directory / 'synthetic.wav'
+        with wave.open(str(path), 'wb') as output:
+            output.setparams((channels, 2, rate, 0, 'NONE', 'not compressed'))
+            output.writeframes(b'\x00\x00' * int(seconds * rate) * channels)
+        return path
+
+    def fake_http(self, timeline=None, port=9999):
+        class FakeServer:
+            def __init__(self, address, handler): self.server_port = port; self.handler = handler
+        with patch('lecture_demo.ThreadingHTTPServer', FakeServer):
+            server, url = make_server(timeline or self.timeline, port)
+        token = parse_qs(urlsplit(url).query)['token'][0]
+        def request(path, cookie='', method='GET', host=None, byte_range=None):
+            handler = object.__new__(server.handler)
+            handler.path = path
+            handler.headers = {'Host': host or f'127.0.0.1:{port}', 'Cookie': cookie}
+            if byte_range is not None: handler.headers['Range'] = byte_range
+            handler.server = server
+            handler.wfile = io.BytesIO(); handler.request_version = 'HTTP/1.1'; handler.requestline = method + ' ' + path; handler.command = method
+            getattr(handler, 'do_' + method)()
+            raw = handler.wfile.getvalue(); header, body = raw.split(b'\r\n\r\n', 1)
+            return int(header.split()[1]), header.decode(), body
+        return request, token, f'lecture_demo_{port}={token}'
 
     def test_originals_do_not_arrive_before_asr_publication(self):
         self.assertEqual(self.timeline.snapshot(11.999)['lines'], [])
@@ -128,23 +184,11 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(before, {path.name: path.read_bytes() for path in self.directory.iterdir()})
 
     def test_http_auth_assets_and_post_rejection_without_socket(self):
-        class FakeServer:
-            def __init__(self, address, handler): self.server_port = 9999; self.handler = handler
-        with patch('lecture_demo.ThreadingHTTPServer', FakeServer):
-            server, url = make_server(self.timeline, 9999)
-        token = parse_qs(urlsplit(url).query)['token'][0]
-        def request(path, cookie='', method='GET', host='127.0.0.1:9999'):
-            handler = object.__new__(server.handler)
-            handler.path = path; handler.headers = {'Host': host, 'Cookie': cookie}; handler.server = server
-            handler.wfile = io.BytesIO(); handler.request_version = 'HTTP/1.1'; handler.requestline = method + ' ' + path; handler.command = method
-            getattr(handler, 'do_' + method)()
-            raw = handler.wfile.getvalue(); header, body = raw.split(b'\r\n\r\n', 1)
-            return int(header.split()[1]), header.decode(), body
+        request, token, cookie = self.fake_http()
         self.assertEqual(request('/api/demo')[0], 403)
         status, headers, html = request('/?token=' + token)
-        self.assertEqual(status, 200); self.assertIn('lecture_demo=', headers); self.assertNotIn('lecture_session=', headers)
+        self.assertEqual(status, 200); self.assertIn('lecture_demo_9999=', headers); self.assertNotIn('lecture_session=', headers)
         self.assertIn(b'demo-toolbar', html); self.assertIn('Content-Security-Policy', headers)
-        cookie = 'lecture_demo=' + token
         self.assertEqual(request('/api/state?at=12', cookie)[0], 200)
         self.assertEqual(request('/api/state?at=nan', cookie)[0], 400)
         self.assertEqual(request('/api/state?at=0&at=20', cookie)[0], 400)
@@ -156,6 +200,153 @@ class DemoTests(unittest.TestCase):
         renderer = request('/app.js', cookie)[2].decode()
         self.assertIn('(function(document,module)', renderer)
         self.assertIn('})(undefined,{exports:{}})', renderer)
+
+    def test_time_zero_default_and_optional_audio_metadata(self):
+        self.assertEqual(self.timeline.metadata()['initial_seconds'], 0)
+        self.assertIsNone(self.timeline.metadata()['audio_url'])
+        request, _, cookie = self.fake_http()
+        self.assertEqual(json.loads(request('/api/state', cookie)[2])['lines'], [])
+        self.assertEqual(request('/audio.wav', cookie)[0], 404)
+
+    def test_continuous_translation_publication_tail_and_rewind(self):
+        histories, _ = self.continuous_fixture()
+        timeline = DemoTimeline(self.directory)
+        self.assertEqual(timeline.duration, 35)
+        self.assertEqual(timeline.snapshot(0)['session']['title'], 'Synthetic saved lecture')
+        self.assertEqual(timeline.snapshot(17.999)['translation']['blocks'], [])
+        first = timeline.snapshot(18)
+        self.assertEqual(first['translation']['blocks'], histories[0]['blocks'])
+        self.assertEqual(first['translation']['pending_lines'], 0)
+        later = timeline.snapshot(22)
+        self.assertEqual(later['translation']['pending_lines'], 1)
+        self.assertEqual(later['translation']['excluded_uncertain_lines'], 1)
+        self.assertEqual(later['translation']['native_lines'], 1)
+        self.assertEqual(len(timeline.snapshot(34.999)['translation']['blocks']), 1)
+        final = timeline.snapshot(35)
+        self.assertEqual(final['translation']['covered_source_ids'], ['one', 'two'])
+        self.assertEqual(final['translation']['pending_lines'], 0)
+        self.assertEqual(final['demo']['untranslated_lines'], 0)
+        self.assertNotIn('translation_ja', final['lines'][0])
+        final['translation']['blocks'][0]['text'] = 'mutated'
+        self.assertEqual(timeline.snapshot(18)['translation']['blocks'][0]['text'], 'first block')
+        self.assertEqual(timeline.snapshot(0)['translation']['blocks'], [])
+
+    def test_continuous_translation_rejects_missing_mismatched_and_future_evidence(self):
+        histories, measured = self.continuous_fixture()
+        for change in ('missing_measurement', 'wrong_target', 'future_target', 'missing_history', 'different_final'):
+            with self.subTest(change=change):
+                modified = deepcopy(measured)
+                current = deepcopy(histories)
+                if change == 'missing_measurement': modified.pop()
+                if change == 'wrong_target': modified[0]['target_source_ids'] = ['two']
+                if change == 'future_target':
+                    current[0]['blocks'][0]['source_ids'] = ['two']
+                    modified[0]['target_source_ids'] = ['two']
+                if change == 'missing_history': current.pop()
+                if change == 'different_final': current[1]['blocks'][0]['text'] = 'not saved final'
+                self.write_rows('measurements.jsonl', self.measurements + modified)
+                self.write_rows('translation-history.jsonl', current)
+                with self.assertRaises(DemoDataError): DemoTimeline(self.directory)
+
+
+
+
+
+
+
+    def test_recorded_schedules_and_audio_progress(self):
+        self.continuous_fixture()
+        timeline = DemoTimeline(self.directory, audio_file=self.wav_fixture())
+        self.assertEqual(timeline.metadata()['audio_seconds'], 20)
+        self.assertEqual(timeline.metadata()['audio_url'], '/audio.wav')
+        self.assertEqual(timeline.metadata()['audio_start_seconds'], 0)
+        self.assertEqual(timeline.metadata()['audio_alignment'], 'session-start approximation')
+        early = timeline.snapshot(5.5)
+        self.assertEqual(early['capture']['audio_seconds'], 5.5)
+        self.assertEqual(early['asr']['schedule']['remaining_seconds'], 4.5)
+        self.assertEqual(timeline.snapshot(11)['asr']['schedule']['reason'], 'request')
+        self.assertEqual(timeline.snapshot(16)['translation']['schedule']['reason'], 'request')
+        self.assertIsNone(timeline.snapshot(16)['translation']['schedule']['remaining_seconds'])
+        self.assertEqual(timeline.snapshot(23)['translation']['schedule']['remaining_seconds'], 8)
+        self.assertEqual(timeline.snapshot(28)['translation']['schedule']['reason'], 'shared_slot')
+        self.assertEqual(timeline.snapshot(35)['translation']['schedule']['state'], 'complete')
+        self.assertEqual(timeline.snapshot(35)['capture']['audio_seconds'], 20)
+
+    def test_failed_generation_is_not_completion_and_preserves_reservation(self):
+        self.continuous_fixture()
+        state = json.loads((self.directory / 'state.json').read_text())
+        error = {'category': 'quota', 'provider_code': 'insufficient_quota'}
+        for kind in ('translation', 'analysis'):
+            state[kind].update(state='failed', error='quota failed', schedule={'error': error})
+        state['translation']['blocks'] = []
+        self.write('state.json', state)
+        self.write_rows('measurements.jsonl', [row for row in self.measurements if row['stage'] == 'asr'])
+        self.write_rows('translation-history.jsonl', [])
+        self.write_rows('analysis-history.jsonl', [])
+        self.write_rows('generation-events.jsonl', [{'at': 1014, 'stage': kind, 'event': 'failed', 'error': error} for kind in ('translation', 'analysis')])
+        self.write('cost-report.json', {'confirmed_api_usd': 0, 'retained_reservation_usd': .2, 'additional_api_usd': None})
+        before = {path.name: path.read_bytes() for path in self.directory.iterdir()}
+        timeline = DemoTimeline(self.directory)
+        self.assertEqual(timeline.snapshot(13)['analysis']['state'], 'waiting')
+        self.assertEqual(timeline.snapshot(14)['analysis']['state'], 'failed')
+        final = timeline.snapshot(timeline.duration)
+        self.assertEqual(final['translation']['state'], 'failed')
+        self.assertEqual(final['translation']['pending_lines'], 2)
+        self.assertEqual(final['translation']['schedule']['error'], error)
+        self.assertEqual(timeline.cost['retained_reservation_usd'], .2)
+        self.assertIsNone(timeline.cost['additional_api_usd'])
+        self.assertEqual(before, {path.name: path.read_bytes() for path in self.directory.iterdir()})
+
+    def test_audio_rejects_invalid_mismatched_or_accelerated_input(self):
+        self.continuous_fixture()
+        for name, contents in [('not-wave.bin', b'not a WAV'), ('truncated.wav', b'RIFF')]:
+            path = self.directory / name; path.write_bytes(contents)
+            with self.subTest(name=name), self.assertRaises(DemoDataError): DemoTimeline(self.directory, audio_file=path)
+        for options in ({'seconds': 19}, {'channels': 2}, {'rate': 8000}):
+            with self.subTest(options=options), self.assertRaises(DemoDataError):
+                DemoTimeline(self.directory, audio_file=self.wav_fixture(**options))
+        path = self.wav_fixture()
+        path.write_bytes(path.read_bytes()[:-2])
+        with self.assertRaises(DemoDataError): DemoTimeline(self.directory, audio_file=path)
+        self.wav_fixture()
+        self.write('runtime-manifest.json', {'configuration': {'pace': 0}})
+        with self.assertRaises(DemoDataError): DemoTimeline(self.directory, audio_file=path)
+        DemoTimeline(self.directory)  # Legacy display-only replay remains usable.
+        self.write('runtime-manifest.json', {'configuration': {'pace': 1}})
+        state = json.loads((self.directory / 'state.json').read_text()); state['display_simulation'] = {'source_label': 'synthetic'}
+        self.write('state.json', state)
+        with self.assertRaises(DemoDataError): DemoTimeline(self.directory, audio_file=path)
+
+    def test_audio_auth_fixed_file_range_head_and_port_scoped_cookie(self):
+        self.continuous_fixture()
+        path = self.wav_fixture()
+        expected = path.read_bytes()
+        timeline = DemoTimeline(self.directory, audio_file=path)
+        request, token, cookie = self.fake_http(timeline)
+        self.assertEqual(request('/audio.wav')[0], 403)
+        self.assertEqual(request('/audio.wav', cookie, host='evil.example')[0], 403)
+        self.assertEqual(request('/audio.wav', 'lecture_demo_9998=' + token)[0], 403)
+        self.assertEqual(request('/audio.wav', cookie)[2], expected)
+        status, headers, data = request('/audio.wav', cookie, byte_range='bytes=0-43')
+        self.assertEqual((status, data), (206, expected[:44]))
+        self.assertIn(f'Content-Range: bytes 0-43/{len(expected)}', headers)
+        self.assertIn('Accept-Ranges: bytes', headers)
+        self.assertIn("media-src 'self'", headers)
+        for byte_range, wanted in [('bytes=44-', expected[44:]), ('bytes=-20', expected[-20:]),
+                                   ('bytes=4-9999999', expected[4:])]:
+            with self.subTest(byte_range=byte_range):
+                self.assertEqual(request('/audio.wav', cookie, byte_range=byte_range)[2], wanted)
+        for byte_range in ('bytes=99999999-', 'bytes=8-4', 'bytes=-0', 'bytes=0-1,4-5', 'items=0-1', 'bytes=-'):
+            with self.subTest(byte_range=byte_range):
+                status, headers, data = request('/audio.wav', cookie, byte_range=byte_range)
+                self.assertEqual((status, data), (416, b''))
+                self.assertIn(f'Content-Range: bytes */{len(expected)}', headers)
+        status, headers, data = request('/audio.wav', cookie, method='HEAD')
+        self.assertEqual((status, data), (200, b''))
+        self.assertIn(f'Content-Length: {len(expected)}', headers)
+        path.write_bytes(b'replaced')
+        self.assertEqual(request('/audio.wav?path=/etc/passwd', cookie)[2], expected)
+        self.assertEqual(request('/../../synthetic.wav', cookie)[0], 404)
 
     def test_production_port_forbidden_without_binding(self):
         with patch('lecture_demo.ThreadingHTTPServer') as listener:
