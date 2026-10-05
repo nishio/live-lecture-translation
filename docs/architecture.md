@@ -46,6 +46,8 @@ Translation aims to preserve the eligible speech sequence. Analysis selects and 
 
 Continuous translation has a nominal 60-second interval; analysis has a nominal 120-second interval. They share one cloud request slot and are scheduled so that one workload does not monopolize it. The actual publication time also includes chunk waiting, recognition, earlier queued work, network latency, generation, validation, and persistence.
 
+Local LLM processing through Ollama also generates line/block translations and understanding support. It defaults to `qwen3:4b` and requires a separately running Ollama server and installed model. Its recent-window translation output is part of the analysis path; the independent pending-source translation queue is enabled only for the cloud provider. The recorded quality concern applies to the evaluated `qwen3:4b` configuration, not to local inference in general.
+
 ## What the cloud model receives
 
 The standard [cloud launcher](../start.command) explicitly selects `gpt-6.1-sol` for translation and analysis. MLX Whisper performs audio recognition locally. The shared adapter also supports `gpt-6-luna` and uses it when no model is supplied at that layer; this fallback does not override the launcher's explicit choice.
@@ -77,7 +79,9 @@ The server retains its recent 60 snapshots in normal state, while the authentica
 
 The coordinator keeps capture, recognition, translation, and analysis state visible. A stale or unsuccessful state query means that current state is unknown. It does not mean recording has stopped.
 
-The dashboard stop action stops new capture and follows the remaining recognition, translation, and final analysis. Application interruption is a different path: remaining work may be left pending. Automatic resumption after process exit is not implemented.
+The dashboard stop action stops new capture and follows the remaining recognition, translation, and final analysis. It can therefore start further paid requests after recording stops. Completed source/translation work is not periodically resent after final drain. A pure connectivity-precheck failure remains eligible for repeated checks without a deadline and can send pending text after connectivity returns; it does not enter the bounded actual-request retry cycle. Application shutdown stops scheduling new processing through its abort flag, but an already started cloud worker may still submit or complete a request. Submitted requests are not cancelled. Remaining work may be left pending, and automatic resumption after process exit is not implemented.
+
+There is no same-session recording pause/resume or general UI control for stopping future API requests. Reading hold and retry pause have narrower meanings. Once capture and all source/processing workers end, starting again creates a new session ID, storage directories and empty context. Prior files and shared cost/scope accounting remain; failed old work is not implicitly resumed. See [operation](operation.md#finish-before-closing).
 
 Storage locks and state snapshots are separated so that status can expose the last confirmed progress when an I/O operation is slow. The reader's input watchdog shares its thread with I/O; it cannot by itself guarantee recovery from a filesystem operation that never returns. A responsive stop request can therefore report that completion is unconfirmed.
 

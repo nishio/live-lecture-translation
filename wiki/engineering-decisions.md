@@ -132,6 +132,18 @@ Validate copyable commands without starting inference or paid APIs. Test the sel
 
 Answer these with publishable fixtures or newly documented trials. Do not promote a historical short-run result into a general performance guarantee.
 
+## Stop, breaks and lecture boundaries must be explicit
+
+The 1.0 candidate review exposed three different operations hidden behind ordinary expectations of “stop”: stop capturing and finish the backlog, stop admitting new model requests while retaining pending work, and temporarily pause a lecture so the same context can resume. The current dashboard implements the first; reading hold and retry pause do not implement the others.
+
+In rc.1, recording stop intentionally allows further paid translation and analysis. Pure connectivity failures are checked again about every 30 seconds without starting the actual-request retry window. That wait can survive recording stop indefinitely and send deferred text when connectivity and the then-current scope/budget permit. A synthetic scheduler inspection confirmed it remained eligible after a simulated 24-hour delay without an API retry attempt. The bounded three-additional-attempt/five-minute rule does not cover this condition. A cost admission limit is not a stop deadline, and closing a browser is not a backend stop.
+
+Starting again after all previous work ends creates a fresh session and context, retaining the earlier files and shared accounting. This supports separate lectures but does not resume a lecture across a break. Unfinished work is not automatically replayed. `Ctrl-C` requests application shutdown and stops scheduling new work, but a cloud worker already started may still submit or complete a request and incur a charge; submitted requests are not cancelled, and unconfirmed shutdown and unknown charges remain explicit.
+
+Treat the missing control for future API work, post-stop connectivity waiting and same-session break handling as unresolved release work, not as features established by passing CPU tests. Define each operation's capture, pending-source, request and context behavior before implementation. The [operation guide](../docs/operation.md#finish-before-closing) documents current behavior, and the [candidate acceptance list](../docs/release-1.0.md#acceptance-before-a-stable-10-announcement) records the remaining decision and verification.
+
+Installation descriptions must also name the component that needs a tool: Swift builds the native microphone helper, not Whisper itself. Explain that local LLM translation/analysis is available through Ollama, and scope the observed quality problem to the evaluated default `qwen3:4b` configuration rather than all local LLMs. The separate pending-source translation queue remains cloud-only.
+
 ## Release acceptance follows the distributed source
 
 Freeze a dependency-complete candidate, including new modules and its license, before calling it a release. Record source identity, test totals and skipped layers, then exercise setup in a separate fresh environment without borrowing the running application's virtual environment or ledgers. A same-Mac installation is not independent hardware validation. Keep the v0.9.0 baseline and active sessions intact.

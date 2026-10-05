@@ -26,9 +26,9 @@ Version **1.0.0-rc.1** is a release candidate for Apple Silicon Macs. See the [r
 
 ## Requirements and setup
 
-To run speech recognition, you need an Apple Silicon Mac, Python 3.12 or later, and the Swift compiler included in Apple's Command Line Tools. Windows, Linux, and Intel Macs have not been validated. A microphone is needed only for live recording.
+Transcription uses an Apple Silicon Mac and Python 3.12 or later. Apple's Command Line Tools provide the Swift compiler used to build the small native microphone helper on your Mac. Swift prepares that recording program; it does not run the speech recognition model. The current standard setup checks that the compiler is available. Windows, Linux, and Intel Macs have not been validated.
 
-Recording and transcription run on your Mac and do not require an API key. Japanese translation, key points, and concept explanations require **an OpenAI API key and paid API access**. Audio stays on the Mac; recognized text is sent to the cloud. Review the [cost estimates](#cost-by-lecture-duration) and [data handling](docs/data-handling.md) before starting.
+Recording and transcription run on your Mac and do not require an API key. Japanese translation, key points, and concept explanations can use a local LLM through Ollama or the OpenAI API. The recommended cloud configuration described below requires **an OpenAI API key and paid API access**. With that configuration, audio stays on the Mac and recognized text is sent to the cloud. Review the [cost estimates](#cost-by-lecture-duration) and [data handling](docs/data-handling.md) before starting.
 
 Download or clone the repository, then run the initial setup from its directory. Setup needs an internet connection to download dependencies and the speech recognition model.
 
@@ -67,9 +67,22 @@ With your API key set in the `OPENAI_API_KEY` environment variable, run the foll
 
 The first command checks startup prerequisites; the second opens the dashboard. Select your audio input and press the recording start button. Allow microphone access when macOS requests it.
 
-Use the cloud configuration above for continuous translation. The local analysis available without `--cloud` did not preserve meaning adequately in prior evaluation.
+Without `--cloud`, a local LLM through Ollama can generate translations, key points and concept explanations. Install and run Ollama and the selected model separately. Local processing needs no API key and keeps audio and recognized text on your Mac. However, evaluation of the default **`qwen3:4b` found incorrect translations and relationships between ideas, falling short of the quality needed for lecture understanding**. This finding applies to the evaluated model and settings, not to every local LLM. The cloud configuration above is currently recommended.
 
-After recording, use the dashboard's stop button and wait for saving and remaining recognition, translation, and final analysis to finish. Keep the Mac powered and awake during capture. Closing the terminal is not equivalent to a completed recording session.
+Local mode generates translations and understanding support for a recent source window. The separate continuous-translation queue that processes and accumulates pending source text is currently available with the cloud configuration.
+
+Keep the Mac powered and awake during capture.
+
+## Stop, take a break, or begin another lecture
+
+**The recording stop button does not stop API processing.** It ends new capture while saved audio, pending translations and final analysis continue, so API charges can occur afterward. Confirm each stage's completion. Connectivity waiting has no automatic cutoff: pending text may be sent when the connection returns later. The daily budget admission check is separate from a processing deadline.
+
+Closing the browser or tab does not stop capture or processing. To request application shutdown and leave remaining work pending, press `Ctrl-C` in its terminal. A cloud worker already started may still send or complete a request after shutdown is requested and incur a charge; submitted requests are not cancelled. Treat unconfirmed shutdown as unconfirmed, and inspect the saved state. Automatic resumption of pending work is not implemented.
+
+- **A break within a lecture:** Same-session recording pause/resume is not available. Holding the reading view affects only the display; pausing automatic retries affects only the relevant retries. To omit a break from recording, stop, wait for remaining processing to end, then start a separate session. Earlier context is not carried over automatically.
+- **Another lecture:** After the previous capture and processing have ended, press the recording start button again in the same dashboard. It creates a new storage location and empty context while retaining the earlier files. Failed or pending work from the previous session is not resumed automatically. Daily spending and transmission allowances are not reset.
+
+See the [operation guide](docs/operation.md#finish-before-closing) for the detailed stop states and limitations.
 
 ## Cost by lecture duration
 

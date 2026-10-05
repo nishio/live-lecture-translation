@@ -1,6 +1,6 @@
 # Version 1.0 release candidate
 
-**Status: 1.0.0-rc.1, 2026-10-05. Installation and synthetic checks passed; real microphone/cloud acceptance is pending.** These notes describe the release candidate and its evidence, not a completed stable 1.0 release. The `v0.9.0` baseline remains unchanged, and preparing this candidate does not switch an existing recording session to new code.
+**Status: 1.0.0-rc.1, 2026-10-05. Installation and synthetic checks passed; stop/break lifecycle work and real microphone/cloud acceptance are pending.** These notes describe the release candidate and its evidence, not a completed stable 1.0 release. The `v0.9.0` baseline remains unchanged, and preparing this candidate does not switch an existing recording session to new code.
 
 ## Scope
 
@@ -38,13 +38,14 @@ The experiments' confirmed API costs are separate from the earlier USD 0.178775 
 
 ## Acceptance before a stable 1.0 announcement
 
-The installation and synthetic checks below passed. The real microphone/cloud session and its final saved-result review remain **pending**. A successful stop request alone cannot complete either check.
+The installation and synthetic checks below passed. The stop/break lifecycle review, real microphone/cloud session and final saved-result review remain **pending**. The post-candidate operational review found indefinite connectivity waiting after stop; stable 1.0 is held for its resolution. A successful stop request alone cannot complete the end-to-end checks.
 
 | Status | Check | Evidence required |
 | --- | --- | --- |
 | Passed | Freeze the candidate | Commit or equivalent immutable source identity includes the source-policy module, tests, license and release metadata; verify the publication contains only permitted files and preserves the `v0.9.0` tag. |
 | Passed | Candidate regression checks | 462 Python tests: 460 passed, two optional native tests skipped; both Node UI suites passed on the code identity below. |
 | Passed, same Mac | Clean-environment installation | Apple M1 Pro (MacBookPro18,1), macOS 15.1.1, Python 3.14.7; independent fresh checkout, virtual environment and caches. Setup, dependency check, model download, decoder, module imports, native-helper compilation and local startup preflight passed. This is not a second-Mac validation or a cloud-authentication test. |
+| Pending | Resolve stop and break behavior | Prevent indefinite post-stop connectivity waiting from silently sending deferred text later; define explicit user controls for ending new API work and handling lecture breaks. Confirm the selected behavior with synthetic lifecycle tests and clear UI/documentation before stable release. These controls are not implemented in rc.1. |
 | Pending | Real microphone pipeline | With explicit recording and cloud authorization, confirm microphone permission, incoming audio and increasing saved duration, new ASR, Japanese translation and understanding output. Run long enough to exercise both cloud workloads; retain stage outcomes, publication timing, confirmed costs and unresolved reservations separately. |
 | Pending | Stop and inspect the saved result | Stop through the dashboard, verify capture saving and remaining ASR, translation and final analysis independently, then open the saved result. Check final partial audio/source coverage and representative names, quantities and negation against the authorized audio; preserve any failure or uncertainty. |
 
@@ -59,8 +60,9 @@ Perform acceptance in an isolated candidate instance between sessions, preservin
 - Recognition, translation and explanations can be wrong. Source-ID coverage confirms which recognized rows were processed; it does not prove that speech was recognized or interpreted correctly. Some repetitive noise remains even with the new policy.
 - Recognition still uses append-only 15-second chunks by default. Translation and analysis have nominal 60- and 120-second intervals; chunk waiting, queueing and generation add delay. These are not immediate subtitles or speech-to-screen latency guarantees.
 - Provisional recognition, automatic correction using later audio, and revision of already published translations are not included. Sentence-boundary waiting is a heuristic over complete source rows.
+- Same-session recording pause/resume and a general UI action to stop new API work are not implemented. Recording stop drains pending work and can incur further charges. Connectivity prechecks have no deadline after stop and may send deferred text when the connection returns; the bounded request-retry policy does not cover this wait. Browser closure does not stop the backend. See [stop and lecture transitions](operation.md#finish-before-closing).
 - Automatic resumption after application exit is not implemented. Dashboard stop, process interruption, and confirmed completion have different meanings. Retries within a running session do not guarantee rapid catch-up after an outage.
 - Long microphone sessions, difficult acoustics, battery life, lid-closed operation, real-network recovery performance and improved comprehension while listening have not been established by the published trials. A short acceptance run would not establish those properties either.
-- Windows, Linux and Intel Macs are outside the validated platform scope. Local analysis without the cloud configuration has not demonstrated adequate semantic quality for the reference workflow.
+- Windows, Linux and Intel Macs are outside the validated platform scope. Local LLM translation and analysis are available through Ollama, but the evaluated default `qwen3:4b` configuration did not provide adequate semantic quality for the reference workflow.
 
-These limits remain part of the release description even after candidate acceptance. See [operation](operation.md) and [architecture](architecture.md) for processing and recovery details.
+The final release description must retain the limits that remain after acceptance. See [operation](operation.md) and [architecture](architecture.md) for processing and recovery details.

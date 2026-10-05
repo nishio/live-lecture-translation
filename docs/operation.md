@@ -9,7 +9,7 @@ Use Python 3.12 or later. Run `./setup.command` for the environment and pinned l
 ./start.command --cloud --authorization config/authorization.json
 ```
 
-The check and server startup do not start recording. The default dashboard port is 8776. `./start.command` alone selects local processing; the retained `qwen3:4b` analysis path has not established acceptable semantic quality and does not provide the continuous cloud translation workflow.
+The check and server startup do not start recording. The default dashboard port is 8776. `./start.command` alone uses a local LLM through Ollama for translations and understanding support. Install and run Ollama and the selected model separately; the default is `qwen3:4b`. Evaluation of that model/settings found incorrect translations and relationships between ideas, so the cloud configuration is recommended. Local mode generates recent-window translations within analysis; it does not use the separate continuous cloud translation queue.
 
 Select the microphone and recognition language. Check that the input is the one you intend to use, the local model and native helper are ready, and adequate storage remains. macOS microphone permission is required. Keep the Mac awake and connected to power during a session.
 
@@ -40,7 +40,7 @@ Prefer the connection with fewer failures and more consistent latency in this co
 
 Connection errors may involve networking, DNS, proxies, or TLS; timeouts can also involve server load or processing time. HTTP 429 can represent temporary rate limiting or quota/spending exhaustion, so changing networks alone may not resolve it. Check the provider error subtype when available. Authentication/configuration failures need correction; temporary server failures may recover after waiting. See OpenAI's [error codes](https://developers.openai.com/api/docs/guides/error-codes). The current application does not expose all these diagnostic details.
 
-In continuous mode, a failed connectivity precheck before sending a request is rechecked on a nominal 30-second schedule. The post-v0.9 continuous cloud coordinator also retries recoverable actual request failures, up to three additional attempts started within five minutes of the first temporary failure. It respects server retry delays and retains failed inputs and cost reservations. Authentication, quota, unexplained 429, budget and invalid-response failures require attention. Use 「自動再試行を保留」 to pause future automatic attempts, or the stage-specific manual retry after resolving a blocking cause. Manual retry does not bypass a remaining server minimum wait; do not clear uncertain cost reservations.
+In continuous mode, a failed connectivity precheck before sending a request is rechecked on a nominal 30-second schedule. This connectivity wait has no automatic deadline, including after recording stops; it is not covered by the request retry limit below. It sends no generation request while offline but may send pending text when connectivity returns and scope/budget still allow it. The post-v0.9 continuous cloud coordinator also retries recoverable actual request failures, up to three additional attempts started within five minutes of the first temporary failure. It respects server retry delays and retains failed inputs and cost reservations. Authentication, quota, unexplained 429, budget and invalid-response failures require attention. Use 「自動再試行を保留」 to pause future automatic attempts, or the stage-specific manual retry after resolving a blocking cause. Manual retry does not bypass a remaining server minimum wait; do not clear uncertain cost reservations.
 
 Saved local recognition lets that running session resume translation using text only. It does not guarantee rapid recovery: during capture, the usual translation interval and shared cloud request slot still apply. Check the pending-line count and translation progress as processing resumes. Do not restart the application as a recovery shortcut; automatic restart recovery is not implemented.
 
@@ -64,9 +64,26 @@ Recognition processes a 15-second audio chunk at a time by default, so several s
 
 ## Finish before closing
 
-Use the dashboard stop action and wait for capture saving and the remaining recognition, translation, and final analysis. Check their completion states before closing the application. Retain the session data when a stage fails or its completion cannot be confirmed.
+The dashboard's 「録音を停止」 stops new capture and drains saved audio, remaining translation and final analysis. It does **not** stop cloud generation; further paid requests can be sent after the click, without the normal generation interval delay during final drain. When the remaining work completes, the processing worker exits rather than regenerating the same content periodically. Retain the session when a stage fails or completion cannot be confirmed.
+
+| Action | Capture | New model requests and pending work |
+| --- | --- | --- |
+| 「録音を停止」 | Requests capture stop and saving | Continues remaining work, including cloud requests; offline waiting can remain indefinitely |
+| Close the browser/tab or hold the reading view | Continues | Continues in the application process |
+| 「自動再試行を保留」 | Continues | Pauses only the offered retry path; not general processing or pure connectivity waiting |
+| `Ctrl-C` in the application terminal | Requests shutdown and capture stop | Stops scheduling new work and retains unfinished work; an already started worker may still send or complete an API request |
+
+There is no UI action to stop all future model requests immediately while keeping the current session open. The configured daily budget limits admission of further requests, but it is not a shutdown deadline or a cancellation mechanism. The application waits up to 130 seconds when shutting down through its CLI; a thread still running afterward is an unconfirmed shutdown and may keep the process alive. An already started cloud worker may still submit or complete an API request and incur a charge after shutdown was requested; submitted requests are not cancelled. Closing a terminal window is not evidence that all capture, storage and processing finished.
 
 If automatic attempts have been paused or exhausted, or the error is not retryable, use the dedicated translation retry after the underlying issue is resolved. Do not infer successful completion from a disappeared terminal or a closed browser. Interrupting the process may leave pending work; the application does not automatically resume it after a restart.
+
+## Breaks and a new lecture
+
+Same-session recording pause/resume is not implemented. 「閲覧を固定」 affects the reading position, and 「自動再試行を保留」 affects an eligible retry; neither pauses a lecture recording. The schedule card is informational and does not stop capture at a break or start another lecture.
+
+To avoid recording a break with the current implementation, stop recording, wait for remaining processing to end, then start again. This creates a separate session, so the earlier lecture context is not automatically carried into the resumed portion. Indefinite offline waiting can prevent this transition; do not interpret a stopped microphone as an idle application.
+
+For a new lecture, press 「録音を開始」 after all previous capture/source/processing threads have ended and capture saving is confirmed. Each start creates a unique session ID and separate data/result directories, clearing displayed sources, translations and understanding context. Previous files remain saved. Old failed or pending work is not replayed automatically, and the shared daily cost and text-duration allowances are not reset. Start is rejected while the previous work is still active; no concurrent handoff is implemented.
 
 ## Preserve a working session
 

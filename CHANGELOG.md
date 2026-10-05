@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Clarify why microphone preparation needs Swift, the available Ollama translation/analysis path and evaluated `qwen3:4b` quality, and the different meanings of recording stop, shutdown, breaks and starting a new lecture. Record indefinite post-stop connectivity waiting as unresolved release work.
+
 ## 1.0.0-rc.1 — 2026-10-05
 
 Release candidate for Apple Silicon Macs. See the [release notes and acceptance status](docs/release-1.0.md). This is not the final 1.0 release.
