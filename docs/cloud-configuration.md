@@ -12,6 +12,8 @@ cp config/authorization.example.json config/authorization.json
 
 Review the JSON and set its fields for your own use. The example starts with `human_approved: false`, a `YYYY-MM-DD` date placeholder, and a zero budget. Set the allowed date, a daily USD limit, and a microphone-text allowance no greater than six hours. Set approval to true only after reviewing the transmission scope and limit. Do not reuse another person's working authorization.
 
+For microphone use, replace all three `YYYY-MM-DD` placeholders with the same intended use date in Japan Standard Time: the entry in `allowed_dates`, `microphone_date`, and the key in `daily_budget_usd_by_date`. Keep `gpt-6.1-sol` in `allowed_models`; the microphone launcher selects that model.
+
 For a saved-audio-only run, set `microphone_max_seconds` to `0` and list the exact input path and SHA256 under `replay_sources`. Zero disables every microphone-text request, including an empty one, while preserving explicitly authorized replay. Existing microphone reservations remain in the ledger when this allowance is disabled.
 
 The authorization JSON is authoritative for the allowed daily budget. A day not explicitly authorized has a zero allowance. Day boundaries use Japan Standard Time. Text duration and USD budget are independent limits; having room in one does not override the other. The supported cloud model labels are `gpt-6-luna` and `gpt-6.1-sol`.
@@ -20,7 +22,13 @@ Keep the private authorization and accounting files out of commits. Changing aut
 
 ## Supply a key
 
-The launcher accepts `OPENAI_API_KEY` from the environment. Alternatively, select a private key file explicitly:
+The launcher accepts `OPENAI_API_KEY` from the environment. Alternatively, create `private.env` in the repository directory using an editor. Use this format, replacing the placeholder with your own key:
+
+```dotenv
+OPENAI_API_KEY=your-api-key
+```
+
+The file is ignored by Git. Select it explicitly when checking and starting the application:
 
 ```sh
 ./start.command --check --cloud --authorization config/authorization.json --key-file private.env
