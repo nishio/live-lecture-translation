@@ -40,6 +40,20 @@ def envelope(body):
 
 
 class SnapshotRequestTest(unittest.TestCase):
+    def test_understanding_prompt_preserves_evidence_contract_and_schema(self):
+        request = analysis.build_snapshot_request([line()], translation_ids=['a'])
+        prompt = request['messages'][0]['content']
+        for phrase in ('現在伝えている主旨', '質問・仮説・例・保留', '断定的な主張へ変換しません',
+                       'それを支える理由や例', '非説明は項目にしません', '語の意味',
+                       'basis=lecture', 'basis=background', '未検証の背景補足',
+                       '背景補足をheadline/summary/flowの証拠に混ぜません',
+                       'previous_context', '証拠ではありません', 'through_seconds',
+                       'uncertain=true', '固有名の漢字表記や外部事実を創作しません'):
+            self.assertIn(phrase, prompt)
+        self.assertEqual(analysis.BODY_KEYS, set(request['schema']['properties']))
+        self.assertEqual(['a'], request['translation_ids'])
+        self.assertEqual(analysis.PROMPT_FINGERPRINT, request['prompt_fingerprint'])
+
     def test_block_translation_is_opt_in_with_distinct_prompt_schema_and_cache_payload(self):
         source = [line(), line('b', 3, 'Only if the community agrees', uncertain=True)]
         legacy = analysis.build_snapshot_request(source, translation_ids=['a'])

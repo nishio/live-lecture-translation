@@ -290,7 +290,8 @@ class LectureApp:
                                      'analysis_interval_seconds': self.analysis_interval}
             result['capabilities'].update(continuous_translation=self.continuous_translation,
                 continuous_translation_enabled=self.continuous_translation,
-                translation_interval_seconds=self.translation_interval)
+                translation_interval_seconds=self.translation_interval,
+                analysis_history_paging=True)
             from lecture_readiness import AGENDA
             result['capabilities']['agenda'] = deepcopy(AGENDA)
             if self.readiness:
@@ -1454,6 +1455,27 @@ def make_server(app, port=8776):
                     'started_at': getattr(app, 'started_at', None)})
             if parsed.path == '/api/state':
                 return self.send(200, app.snapshot())
+            if parsed.path == '/api/analysis-history':
+                from lecture_history import read_history_page
+                query = parse_qs(parsed.query)
+                expected_session = query.get('session_id', [''])[0]
+                with app.lock:
+                    current_session = (app.state.get('session') or {}).get('id')
+                    directory = app.result_dir or getattr(app, 'history_result_dir', None)
+                if not expected_session or expected_session != current_session or directory is None:
+                    return self.send(409, {'error': '現在のセッションの保存履歴を選んでください。'})
+                try:
+                    page = read_history_page(directory, session_id=current_session,
+                        limit=int(query.get('limit', ['30'])[0]), cursor=query.get('cursor', [None])[0],
+                        through_generated_at=float(query['before'][0]) if 'before' in query else None)
+                except (ValueError, TypeError):
+                    return self.send(400, {'error': '履歴の範囲を確認できません。画面を再読み込みしてください。'})
+                except OSError:
+                    return self.send(500, {'error': '保存履歴を読み込めません。保存先を確認してください。'})
+                with app.lock:
+                    if (app.state.get('session') or {}).get('id') != current_session:
+                        return self.send(409, {'error': 'セッションが変わりました。最新の状態を取得してください。'})
+                return self.send(200, page)
             if parsed.path == '/api/devices':
                 try:
                     from lecture_capture import list_devices
@@ -1568,6 +1590,8 @@ def main():
         if saved.get('schema_version') != 1 or not isinstance(saved.get('lines'), list):
             parser.error('保存状態の形式が不正です。')
         app.state = saved
+        # CLI-selected directory only; never follow a path embedded in saved JSON.
+        app.history_result_dir = args.view_session.resolve().parent
         app.state['message'] = '保存済みの結果を表示しています。現在の録音ではありません。'
         if app.state['capture']['state'] in ACTIVE:
             app.state['capture'].update(state='failed', error='保存時は録音中でした。現在の状態は未確認です。')

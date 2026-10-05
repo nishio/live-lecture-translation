@@ -65,9 +65,58 @@
     return result;
   }
 
+  function transcriptDisplayGroups(lines) {
+    const groups = [];
+    for (const line of lines) {
+      const normalized = text(line.text).replace(/\s+/g, ' ').trim().toLowerCase();
+      const key = line.uncertain && normalized ? JSON.stringify([text(line.language), normalized]) : null;
+      const previous = groups[groups.length - 1];
+      // This only groups visible rows. Keep each source line and its uncertainty
+      // intact in the received state for translation, history and saved evidence.
+      if (key !== null && previous?.key === key) previous.lines.push(line);
+      else groups.push({key, lines: [line]});
+    }
+    return groups;
+  }
+
   function contentSignature(state) {
     return JSON.stringify([state?.session?.id, state?.analysis?.generated_at, state?.analysis?.through_seconds, state?.analysis?.result, state?.lines,
-      state?.translation?.enabled, state?.translation?.blocks]);
+      state?.translation?.enabled, state?.translation?.blocks, state?.analysis_history]);
+  }
+
+  function schedulePresentation(schedule, fresh, elapsed = 0, kind = 'analysis') {
+    if (!fresh) return {state: 'unknown', label: '状態不明', compact: '状態不明', fraction: 0};
+    if (!schedule) return {state: 'unknown', label: '更新予定は未取得', compact: '未取得', fraction: 0};
+    if (schedule.state === 'complete') return {state: 'complete', label: '処理済み', compact: '処理済み', fraction: 0};
+    if (schedule.state === 'waiting' && schedule.reason === 'continuation') {
+      return {state: 'waiting', label: '文の続き待ち', compact: '続き待ち', fraction: 0};
+    }
+    const audioClock = schedule.clock === 'audio' || kind === 'asr';
+    const remaining = number(schedule.remaining_seconds) ? Math.max(0, schedule.remaining_seconds - (audioClock ? 0 : Math.max(0, elapsed))) : null;
+    const total = number(schedule.wait_seconds) ? schedule.wait_seconds : schedule.interval_seconds;
+    if (schedule.state === 'waiting' && remaining !== null) {
+      const action = kind === 'asr' ? '次の音声区間の受付' : (({retry: '自動再試行', offline: '接続の再確認'})[schedule.reason] || '次の開始判定');
+      const attempt = schedule.reason === 'retry' && number(schedule.retry?.attempts) && number(schedule.retry?.max_attempts)
+        ? `（${schedule.retry.attempts}/${schedule.retry.max_attempts}）` : '';
+      const prefix = ({retry: '再試行 ', offline: '接続待ち '})[schedule.reason] || '';
+      return {state: 'waiting', label: remaining > 0 ? `${action}まで ${Math.ceil(remaining)}秒${attempt}` : (kind === 'asr' ? '次の音声区間の受付待ち' : `${action}の開始待ち${attempt}`),
+        compact: remaining > 0 ? `${prefix}${Math.ceil(remaining)}秒` : (kind === 'asr' ? '受付待ち' : '開始待ち'),
+        fraction: number(total) && total > 0 ? Math.min(1, remaining / total) : 0};
+    }
+    if (kind === 'asr') {
+      const label = ({request: '認識中', queued: '認識待ち', stalled: '入力待ち', stopping: '音声の保存待ち', finalizing: '認識の完了確認中', no_source: '音声待ち',
+        saved_view: '保存結果の閲覧中', closed: '処理停止', unknown: '状態不明', failed: '文字起こしの確認が必要', error: '文字起こしの確認が必要'})[schedule.reason]
+        || ({busy: '認識中', due: '認識待ち', blocked: '確認が必要', idle: '待機'})[schedule.state] || '状態不明';
+      const compact = ({stopping: '保存待ち', finalizing: '完了確認中', saved_view: '保存結果', failed: '要確認', error: '要確認'})[schedule.reason]
+        || (schedule.state === 'blocked' && label === '確認が必要' ? '要確認' : label);
+      return {state: schedule.state, label, compact, fraction: 0};
+    }
+    const label = ({request: '生成中', shared_slot: 'ほかの処理の完了待ち', asr: '文字起こし待ち',
+      manual_retry: '再試行の操作待ち', disabled: 'オフ', no_source: '原文待ち', no_pending: '新しい対象待ち',
+      closed: '処理停止', saved_view: '保存結果の閲覧中'})[schedule.reason]
+      || ({busy: '処理中', due: '開始待ち', blocked: '確認が必要', idle: '待機', complete: '処理済み'})[schedule.state] || '状態不明';
+    const compact = ({shared_slot: '順番待ち', manual_retry: '要確認', saved_view: '保存結果', no_pending: '新着待ち'})[schedule.reason] || label;
+    return {state: schedule.state, label, compact, fraction: 0};
   }
 
   function createApp(doc, transport, options = {}) {
@@ -97,15 +146,28 @@
     let preflightSignature = '';
     let storage = options.storage;
     if (storage === undefined) { try { storage = doc.defaultView?.localStorage; } catch (_) { storage = null; } }
+    const layoutPreferenceKey = 'lecture-layout:v1';
+    let sourceShare = 50;
+    let sourceDrag = null;
     let failuresSignature = '';
+    let processingAlerts = new Set();
+    let processingSession = null;
     let pending = null;
     let retryBusy = false;
     let translationRetryBusy = false;
     let frozen = false;
-    let frozenLiveSignature = '';
     let historySelection = null;
-    let renderedHistorySignature = '';
-    let historyButtons = new Map();
+    let historyNotice = '';
+    let historyItems = new Map();
+    let historySession = null;
+    let historyCursor = null;
+    let historyHasMore = true;
+    let historyLoading = false;
+    let historyGeneration = 0;
+    let conceptElements = new Map();
+    let conceptSeenCount = 0;
+    let conceptSession = null;
+    const pauseRetryBusy = new Set();
     let displayedState = null;
     let renderedSignature = '';
     let lineElements = new Map();
@@ -131,6 +193,83 @@
     };
     const pill = (id, label, tone) => { put(id, label); $(id).dataset.tone = tone; };
     const message = (value, tone = 'good') => { showText('action-message', value); $('action-message').dataset.tone = tone; };
+
+    function saveSourceShare() {
+      try { storage?.setItem(layoutPreferenceKey, JSON.stringify({version: 1, sourceShare})); } catch (_) { /* Resizing still works without browser storage. */ }
+    }
+
+    function setSourceShare(value, save = false) {
+      if (!number(value)) return;
+      const next = Math.round(Math.max(25, Math.min(75, value)) * 10) / 10;
+      const changed = next !== sourceShare;
+      sourceShare = next;
+      $('source-column').style.setProperty('--source-share', `${sourceShare}%`);
+      const splitter = $('source-splitter');
+      splitter.setAttribute('aria-valuemin', '25');
+      splitter.setAttribute('aria-valuemax', '75');
+      splitter.setAttribute('aria-valuenow', String(sourceShare));
+      splitter.setAttribute('aria-valuetext', `原文 ${sourceShare}%、日本語訳 ${Math.round((100 - sourceShare) * 10) / 10}%`);
+      if (save && changed) saveSourceShare();
+    }
+
+    function sourceColumnRect() {
+      const rect = $('source-column').getBoundingClientRect();
+      return number(rect.top) && number(rect.height) && rect.height > 14 ? rect : null;
+    }
+
+    function endSourceDrag(event, save = true) {
+      if (!sourceDrag || (event && event.pointerId !== sourceDrag.pointerId)) return;
+      const {pointerId, initialShare} = sourceDrag;
+      sourceDrag = null;
+      const splitter = $('source-splitter');
+      splitter.dataset.dragging = 'false';
+      try { if (splitter.hasPointerCapture(pointerId)) splitter.releasePointerCapture(pointerId); } catch (_) { /* Capture can already be lost. */ }
+      if (save && sourceShare !== initialShare) saveSourceShare();
+    }
+
+    function moveSourceDivider(event) {
+      if (!sourceDrag || event.pointerId !== sourceDrag.pointerId || !number(event.clientY)) return;
+      const rect = sourceColumnRect();
+      if (!rect) return;
+      event.preventDefault();
+      setSourceShare((event.clientY - sourceDrag.grabOffset - rect.top) / rect.height * 100);
+    }
+
+    function initializeSourceSplitter() {
+      let saved;
+      try { saved = JSON.parse(storage?.getItem(layoutPreferenceKey) || 'null'); } catch (_) { /* Invalid or unavailable settings use an even split. */ }
+      setSourceShare(saved?.version === 1 && number(saved.sourceShare) ? saved.sourceShare : 50);
+      const splitter = $('source-splitter');
+      splitter.addEventListener('pointerdown', event => {
+        if (disposed || sourceDrag || event.button !== 0 || event.isPrimary === false || !number(event.pointerId) || !number(event.clientY)) return;
+        const rect = sourceColumnRect();
+        if (!rect) return;
+        try { splitter.setPointerCapture(event.pointerId); } catch (_) { return; }
+        sourceDrag = {pointerId: event.pointerId, initialShare: sourceShare,
+          grabOffset: event.clientY - rect.top - rect.height * sourceShare / 100};
+        splitter.dataset.dragging = 'true';
+        splitter.focus({preventScroll: true});
+        event.preventDefault();
+      });
+      splitter.addEventListener('pointermove', moveSourceDivider);
+      splitter.addEventListener('pointerup', event => { moveSourceDivider(event); endSourceDrag(event); });
+      splitter.addEventListener('pointercancel', event => endSourceDrag(event));
+      splitter.addEventListener('lostpointercapture', event => endSourceDrag(event));
+      splitter.addEventListener('keydown', event => {
+        if (disposed || event.altKey || event.ctrlKey || event.metaKey) return;
+        const next = {ArrowUp: sourceShare - 2, ArrowDown: sourceShare + 2, Home: 25, End: 75}[event.key];
+        if (!number(next)) return;
+        event.preventDefault();
+        endSourceDrag(null);
+        setSourceShare(next, true);
+      });
+      splitter.addEventListener('dblclick', event => {
+        if (disposed || event.button !== 0) return;
+        event.preventDefault();
+        endSourceDrag(null);
+        setSourceShare(50, true);
+      });
+    }
 
     function saveIdlePreferences() {
       if (!preferenceKey || getControlState(state, connected, now(), true, pending).settingsDisabled) return;
@@ -299,36 +438,22 @@
       const providerLabel = $('provider-select').value === 'off' ? '原文のみ' : modelLabel;
       const preparing = ['checking', 'blocked'].includes(state?.preflight?.state) ? ' · 準備を確認' : '';
       put('settings-summary', [inputLabel, languageLabel, providerLabel].filter(Boolean).join(' · ') + preparing);
-      const footerProvider = state?.session ? state.analysis?.provider : $('provider-select').value;
-      put('processing-caption', footerProvider === 'openai' ? '原音はこのMacに保存 · 文字のみOpenAIで解析' : '音声と文字起こしはこのMacに保存 · ローカル処理');
-      put('model-caption', ['local', 'openai'].includes(footerProvider) ? (state?.session ? text(state.analysis?.model) : $('model-input').value.trim()) : '');
       put('start-button', pending?.kind === 'start' ? (pending.phase === 'sending' ? '開始を要求中…' : '開始結果を確認中…') : '● 録音を開始');
       put('stop-button', pending?.kind === 'stop' || state?.capture?.state === 'stopping' ? '停止・保存を確認中…' : '録音を停止');
-      $('retry-button').hidden = state?.analysis?.state !== 'failed' || state?.analysis?.provider === 'off';
+      $('retry-button').hidden = state?.analysis?.state !== 'failed' || state?.analysis?.provider === 'off'
+        || state?.analysis?.schedule?.reason === 'retry';
       $('retry-button').disabled = retryBusy || !isFresh(state, connected, now());
       put('retry-button', retryBusy ? '分析の再試行を要求中…' : '分析を再試行');
       $('freeze-button').disabled = !displayedState;
       $('freeze-button').setAttribute('aria-pressed', String(frozen));
       put('freeze-button', frozen ? '表示を固定中' : '閲覧を固定');
       $('latest-button').hidden = !frozen;
-      $('freeze-notice').hidden = !frozen;
-      if (historySelection) {
-        const hasLaterSpeech = array(displayedState?.lines).some(line => number(line.end_seconds) && line.end_seconds > historySelection.through_seconds);
-        put('freeze-notice', `${formatTime(historySelection.through_seconds)} までの分析を固定表示しています。録音と処理は継続します。${hasLaterSpeech ? '原文一覧には、この分析より後の発言も含まれます。' : '原文一覧は、履歴を選んだときの内容です。'}`);
-      } else put('freeze-notice', '表示を固定しています。録音と処理は継続します。');
-      if (frozen) {
-        const newLines = Math.max(0, array(state?.lines).length - array(displayedState?.lines).length);
-        const changed = state && contentSignature(state) !== (frozenLiveSignature || renderedSignature);
-        showText('new-count', newLines ? `原文 ${newLines}件の新着` : (changed ? '新しい訳・分析があります' : ''));
-      } else $('new-count').hidden = true;
+      renderHistoryNavigation();
     }
 
     function renderStatus() {
       const current = now();
       const fresh = isFresh(state, connected, current);
-      $('connection-dot').dataset.tone = fresh ? 'good' : 'warning';
-      put('connection-text', fresh ? 'ローカルサーバーに接続' : '状態を確認できません');
-      put('observed-at', lastReceivedAt ? `最終受信 ${ageText(lastReceivedAt, current)}` : 'まだ状態を受信していません');
       showText('connection-warning', !fresh && state ? `現在の録音状態は不明です。通信の途絶は、録音の停止を意味しません。${connectionError ? `\n${connectionError}` : '\n最新の状態を取得しています。'}` : (!connected && connectionError ? `サーバーに接続できません。${connectionError}` : ''));
       const capture = state?.capture || {};
       const asr = state?.asr || {};
@@ -394,26 +519,118 @@
       renderAgenda();
       renderControls();
       renderTranslationStatus(fresh);
+      renderSchedules(fresh);
+      renderProcessingOverview(fresh, captureView);
+    }
+
+    function renderProcessingOverview(fresh, captureView) {
+      const sessionId = state?.session?.id || null;
+      if (processingSession !== sessionId) { processingAlerts = new Set(); processingSession = sessionId; }
+      const alerts = new Set();
+      const labels = [];
+      let tone = 'muted';
+      if (!fresh) {
+        labels.push(state || connectionError ? '状態不明' : '準備中');
+        // A disconnect does not clear an already observed failure. Reconnecting
+        // to that same failure must respect the reader closing this disclosure.
+        for (const key of processingAlerts) alerts.add(key);
+        if (state || connectionError) alerts.add('connection:unknown');
+      } else {
+        const capture = state.capture || {};
+        const stageLabels = {
+          capture: {idle: '録音待ち', starting: '録音準備中', recording: captureView.label, stalled: '入力途絶', stopping: '保存待ち', completed: '保存済み', failed: '録音失敗'},
+          asr: {idle: '原文待ち', waiting: '文字起こし待ち', running: '文字起こし中', completed: '文字起こし済み', failed: '文字起こし失敗', paused: '文字起こし保留'},
+          translation: {idle: '翻訳待ち', waiting: '翻訳待ち', running: '翻訳中', completed: '翻訳済み', failed: '翻訳失敗', paused: '翻訳保留'},
+          analysis: {idle: '整理待ち', waiting: '整理待ち', running: '整理中', completed: '整理済み', failed: '整理失敗', paused: '整理保留', off: '整理オフ', disabled: '整理オフ'},
+        };
+        for (const kind of ['capture', 'asr', 'translation', 'analysis']) {
+          const stage = state[kind] || {};
+          if (kind === 'translation' && stage.enabled !== true) continue;
+          const off = kind === 'analysis' && stage.provider === 'off';
+          const known = stageLabels[kind][stage.state];
+          const unresolved = stage.completion_confirmed === false && !BUSY_WORK.has(stage.state) && !ACTIVE_CAPTURE.has(stage.state);
+          const name = {capture: '保存', asr: '文字起こし', translation: '翻訳', analysis: '整理'}[kind];
+          const label = off ? '整理オフ' : (unresolved ? `${name}未確認`
+            : (stage.schedule?.retry?.paused && stage.state !== 'failed' ? `${name}保留` : known));
+          labels.push(kind === 'asr' && array(stage.failed_chunks).length ? '未認識あり' : (label || '状態不明'));
+          if (off) continue;
+          if (!known || ['failed', 'stalled', 'paused', 'unknown'].includes(stage.state)) {
+            alerts.add(`${kind}:${stage.state || 'unknown'}:${text(stage.error)}`);
+            if (stage.state === 'failed') tone = 'error';
+          }
+          if (unresolved) alerts.add(`${kind}:unresolved`);
+          if (stage.schedule?.retry?.paused) alerts.add(`${kind}:retry-paused`);
+          if (stage.schedule?.retry?.exhausted || stage.schedule?.reason === 'manual_retry') alerts.add(`${kind}:retry-required`);
+        }
+        if (capture.state === 'recording' && captureView.tone === 'warning') alerts.add('capture:input-stalled');
+        for (const failure of array(state.asr?.failed_chunks)) alerts.add(`asr:chunk:${failure.index}:${failure.start_seconds}:${failure.end_seconds}`);
+        const cloudBusy = ['analysis', 'translation'].some(kind => state[kind]?.state === 'running' || state[kind]?.worker_alive === true);
+        if (number(state.cloud_budget?.reserved_usd) && state.cloud_budget.reserved_usd > 0 && !cloudBusy) {
+          alerts.add('cloud:unresolved-reservation'); labels.push('費用未確定');
+        }
+      }
+      if (pending?.phase === 'reconcile') { alerts.add(`action:${pending.kind}:unresolved`); labels.push('操作確認中'); }
+      if ([...alerts].some(key => !processingAlerts.has(key))) $('processing-details').open = true;
+      processingAlerts = alerts;
+      const overview = $('processing-overview');
+      const label = labels.join(' · ');
+      if (overview.textContent !== label) overview.textContent = label;
+      overview.dataset.tone = tone === 'error' ? 'error' : (alerts.size ? 'warning' : tone);
+      overview.title = alerts.size ? '確認が必要な処理があります。展開して各処理の状態を確認できます。' : '展開すると録音・文字起こし・生成の状態を確認できます。';
+    }
+
+    function renderSchedules(fresh) {
+      for (const kind of ['asr', 'translation', 'analysis']) {
+        const stage = state?.[kind];
+        let schedule = stage?.schedule;
+        if (kind === 'asr' && schedule?.state === 'complete' && (array(stage.failed_chunks).length || stage.error || schedule.error
+          || ['failed', 'paused'].includes(stage.state) || stage.completion_confirmed === false)) {
+          schedule = {...schedule, state: 'blocked', reason: 'error'};
+        }
+        const box = $(`${kind}-schedule`);
+        box.hidden = !state?.session || (kind === 'translation' && state?.translation?.enabled !== true);
+        const view = schedulePresentation(schedule, fresh, lastReceivedAt === null ? 0 : now() - lastReceivedAt, kind);
+        box.dataset.state = view.state;
+        const label = `${frozen ? '現在の処理: ' : ''}${view.label}`;
+        const explanation = kind === 'asr'
+          ? `円は次の音声区間${number(schedule?.interval_seconds) && schedule.interval_seconds > 0 ? `（${schedule.interval_seconds}秒ごと）` : ''}を受け付けるまでの目安です。受信済みの音声時間をもとに更新し、文字起こしの完了時刻を予測するものではありません。`
+          : (view.state === 'waiting' && schedule?.reason === 'continuation'
+            ? '文の区切りを待っています。開始時刻は未定です。'
+            : '円は次の処理を開始できるまでの目安です。生成完了までの時間ではありません。');
+        put(`${kind}-schedule-text`, `${label}。${explanation}`);
+        put(`${kind}-schedule-compact`, view.compact);
+        const summary = $(`${kind}-schedule-summary`);
+        summary.title = `${({asr: '原文', translation: '翻訳', analysis: '整理'})[kind]}: ${label}。${explanation}`;
+        summary.setAttribute('aria-label', summary.title);
+        summary.setAttribute('aria-live', 'off');
+        $(`${kind}-schedule-ring`).style.background = `conic-gradient(#39765b ${view.fraction * 360}deg, #e1e8e2 0deg)`;
+        box.title = explanation;
+        if (kind !== 'asr') {
+          const button = $(`${kind}-pause-retries`);
+          button.hidden = !(schedule?.reason === 'retry' && schedule?.state === 'waiting');
+          button.disabled = !fresh || pauseRetryBusy.has(kind);
+        }
+      }
+    }
+
+    async function pauseRetries(kind) {
+      if (pauseRetryBusy.has(kind) || !isFresh(state, connected, now())) return;
+      pauseRetryBusy.add(kind); renderStatus();
+      try {
+        await fetchJSON('/api/pause-retries', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({stage: kind})});
+        message('自動再試行の保留を要求しました。処理状態を確認します。');
+      } catch (error) { message(error.message, 'warning'); }
+      finally { pauseRetryBusy.delete(kind); await poll(); renderStatus(); }
     }
 
     function renderTranslationStatus(fresh) {
       const translation = state?.translation;
       const enabled = translation?.enabled === true;
-      $('translation-status').hidden = !enabled;
-      $('translation-retry-button').hidden = !enabled || translation.state !== 'failed' || translation.retry_required !== true;
+      $('translation-retry-button').hidden = !enabled || translation.state !== 'failed' || translation.retry_required !== true
+        || translation.schedule?.reason === 'retry';
       $('translation-retry-button').disabled = translationRetryBusy || !fresh;
       put('translation-retry-button', translationRetryBusy ? '翻訳の再試行を要求中…' : '翻訳を再試行');
       showText('translation-error', enabled ? text(translation.error) : '');
-      if (!enabled) return;
-      const labels = {idle: '待機', waiting: '待機', running: '翻訳中', completed: '処理済み', failed: '失敗・要確認', paused: '保留'};
-      const continuation = translation.state === 'waiting' && translation.wait_reason === 'continuation' && !translation.worker_alive;
-      const status = fresh ? (continuation ? '文の続き待ち' : (labels[translation.state] || '不明')) : '状態不明';
-      const counts = [];
-      for (const [key, label] of [['pending_lines', '未訳'], ['excluded_uncertain_lines', '不確か除外'], ['native_lines', '日本語']]) {
-        if (number(translation[key])) counts.push(`${label} ${Math.max(0, translation[key])}行`);
-      }
-      put('translation-status', [`現在の訳: ${status}`, ...counts].join(' · '));
-      $('translation-status').dataset.tone = !fresh || ['failed', 'paused'].includes(translation.state) ? 'warning' : 'muted';
     }
 
     function renderPreflight(fresh, current) {
@@ -457,40 +674,9 @@
       }
     }
 
-    function sourceButtons(parent, sourceIds, lineIndex, collapsed = true) {
-      const ids = [...new Set(array(sourceIds).map(text).filter(Boolean))];
-      if (!ids.length) return;
-      let destination = parent;
-      if (collapsed) {
-        const details = element('details', 'source-disclosure');
-        const summary = element('summary', '', `出典 ${ids.length}`);
-        summary.title = '根拠となる原文を表示';
-        details.appendChild(summary);
-        destination = element('div', 'source-chips'); details.appendChild(destination); parent.appendChild(details);
-      }
-      for (const id of ids) {
-        const line = lineIndex.get(id);
-        const button = element('button', 'source-button', line ? `↗ ${formatTime(line.start_seconds)}` : `出典 ${id}（未取得）`);
-        button.type = 'button';
-        button.disabled = !line;
-        button.title = line ? `${formatTime(line.start_seconds)} の原文を見る` : '対応する原文がこの表示にありません';
-        if (line) button.addEventListener('click', () => {
-          freeze();
-          const target = lineElements.get(id);
-          if (target) { target.scrollIntoView({block: 'nearest', behavior: 'auto'}); target.focus({preventScroll: true}); }
-        });
-        destination.appendChild(button);
-      }
-    }
-
-    function sourceRange(ids, lineIndex) {
-      const sources = ids.map(id => lineIndex.get(id)).filter(line => line && number(line.start_seconds) && number(line.end_seconds));
-      return sources.length ? `${formatTime(Math.min(...sources.map(line => line.start_seconds)))}–${formatTime(Math.max(...sources.map(line => line.end_seconds)))}` : '';
-    }
-
-    function renderTranslations(next, result, lines, lineIndex) {
+    function renderTranslations(next, result, lines) {
       if (next.translation?.enabled === true) {
-        renderContinuousTranslations(next, lineIndex);
+        renderContinuousTranslations(next);
         return;
       }
       if (translationMode !== 'legacy') { renderedTranslationSignature = ''; translationElements = new Map(); }
@@ -514,11 +700,7 @@
         flush();
       }
       const hasLegacyTranslations = !hasBlocks && blocks.length > 0;
-      put('translation-heading', hasLegacyTranslations ? '既存の断片訳' : '文脈で訳し直し');
-      const ids = [...new Set(blocks.flatMap(block => block.source_ids))];
-      put('translation-range', sourceRange(ids, lineIndex));
-      put('translation-caption', blocks.length ? (hasBlocks ? '直近の対象発言をまとめて訳したものです。全講演・全区間を訳し直したものではありません。' : (historySelection ? 'この履歴に保存された断片訳です。現在の訳を当時の訳として補っていません。' : '保存済みの断片訳を発言順につなげて表示しています。文脈で訳し直したものではありません。')) : '');
-      $('translation-caption').hidden = !blocks.length;
+      put('translation-heading', hasLegacyTranslations ? '既存の断片訳' : '文脈付きの日本語訳');
       put('translation-empty', hasBlocks ? 'この時点には、まとまりの訳がありません。' : (historySelection ? 'この履歴には当時の断片訳が保存されていません。' : (next.analysis?.provider === 'off' ? '理解支援はオフです。' : '発言がまとまると、ここに訳を表示します。')));
       $('translation-empty').hidden = !!blocks.length;
       const signature = JSON.stringify([next.session?.id, hasBlocks, blocks]);
@@ -532,28 +714,20 @@
       for (const block of blocks) {
         const article = element('article', 'translation-block');
         article.appendChild(element('p', 'block-translation-text', block.text));
-        const evidence = element('div', 'block-evidence');
-        const range = sourceRange(block.source_ids, lineIndex);
-        if (range) evidence.appendChild(element('span', 'block-range', range));
-        sourceButtons(evidence, block.source_ids, lineIndex);
-        article.appendChild(evidence); panel.appendChild(article);
+        panel.appendChild(article);
       }
       panel.scrollTop = firstRender || nearBottom ? panel.scrollHeight : scrollTop;
     }
 
-    function renderContinuousTranslations(next, lineIndex) {
+    function renderContinuousTranslations(next) {
       const cutoff = historySelection?.generated_at;
       const hasCutoff = number(cutoff) && cutoff > 0;
       const blocks = array(next.translation.blocks).filter(block => text(block?.id) && text(block?.text)
         && (!historySelection || (hasCutoff && number(block.published_at) && block.published_at <= cutoff)));
-      const ids = [...new Set(blocks.flatMap(block => array(block.source_ids).map(text)))];
-      put('translation-heading', '文脈で訳し直し');
-      put('translation-range', blocks.length ? `${sourceRange(ids, lineIndex)} · ${blocks.length}ブロック` : '');
-      put('translation-caption', historySelection ? (hasCutoff ? '選んだ分析の生成時刻までに公開された訳です。' : 'この分析の生成時刻が未記録のため、当時の訳は表示できません。') : '古い未訳から順に追加します。認識が不確かな原文は除外します。');
-      $('translation-caption').hidden = false;
+      put('translation-heading', '文脈付きの日本語訳');
       put('translation-empty', historySelection ? 'この時点に対応する公開済みの訳はありません。' : '原文のまとまりから順に訳を追加します。');
       $('translation-empty').hidden = blocks.length > 0;
-      const signature = JSON.stringify([next.session?.id, blocks, ids.map(id => [id, lineIndex.has(id), lineIndex.get(id)?.start_seconds, lineIndex.get(id)?.end_seconds])]);
+      const signature = JSON.stringify([next.session?.id, blocks]);
       if (translationMode === 'continuous' && signature === renderedTranslationSignature) return;
       const panel = $('translation-blocks');
       const scrollTop = panel.scrollTop;
@@ -567,17 +741,12 @@
       for (const block of blocks) {
         const id = text(block.id);
         if (nextElements.has(id)) continue;
-        const sources = array(block.source_ids).map(text);
         const article = translationElements.get(id) || element('article', 'translation-block');
-        const rowSignature = JSON.stringify([block, sources.map(source => [source, lineIndex.has(source), lineIndex.get(source)?.start_seconds, lineIndex.get(source)?.end_seconds])]);
+        const rowSignature = JSON.stringify(block);
         article.dataset.translationId = id;
         if (article.dataset.translationSignature !== rowSignature) {
           article.dataset.translationSignature = rowSignature;
-          const evidence = element('div', 'block-evidence');
-          const range = number(block.start_seconds) && number(block.end_seconds) ? `${formatTime(block.start_seconds)}–${formatTime(block.end_seconds)}` : sourceRange(sources, lineIndex);
-          if (range) evidence.appendChild(element('span', 'block-range', range));
-          sourceButtons(evidence, sources, lineIndex);
-          article.replaceChildren(element('p', 'block-translation-text', text(block.text)), evidence);
+          article.replaceChildren(element('p', 'block-translation-text', text(block.text)));
         }
         nextElements.set(id, article); rows.push(article);
       }
@@ -605,32 +774,38 @@
       const nextElements = new Map();
       const rows = [];
       const latestId = text(lines[lines.length - 1]?.id);
-      for (const line of lines) {
+      const groups = transcriptDisplayGroups(lines);
+      for (const group of groups) {
+        const line = group.lines[0];
         const id = text(line.id);
+        const sourceIds = group.lines.map(source => text(source.id));
         const row = lineElements.get(id) || element('article', 'transcript-line');
-        const rawSignature = JSON.stringify([line.text, line.start_seconds, line.end_seconds, line.language, line.uncertain]);
+        const rawSignature = JSON.stringify(group.lines.map(source => [source.id, source.text, source.start_seconds, source.end_seconds, source.language, source.uncertain]));
         row.tabIndex = -1; row.dataset.sourceId = id;
-        row.classList.toggle('latest-source', id === latestId);
-        row.setAttribute('aria-current', id === latestId ? 'true' : 'false');
+        row.dataset.sourceIds = JSON.stringify(sourceIds);
+        row.classList.toggle('latest-source', sourceIds.includes(latestId));
+        row.setAttribute('aria-current', sourceIds.includes(latestId) ? 'true' : 'false');
         if (row.dataset.rawSignature !== rawSignature) {
           row.dataset.rawSignature = rawSignature;
-          row.title = `${formatTime(line.start_seconds)}–${formatTime(line.end_seconds)} · ${id}${text(line.language) ? ` · ${text(line.language).toUpperCase()}` : ''}${line.uncertain ? ' · 認識が不確か' : ''}`;
+          row.title = `${formatTime(line.start_seconds)}–${formatTime(group.lines[group.lines.length - 1].end_seconds)} · ${id}${text(line.language) ? ` · ${text(line.language).toUpperCase()}` : ''}${line.uncertain ? ' · 認識が不確か' : ''}`;
           row.classList.toggle('uncertain-source', !!line.uncertain);
           row.replaceChildren(element('p', 'line-original', text(line.text)));
         }
         nextElements.set(id, row); rows.push(row);
       }
-      const appendOnly = oldIds.length > 0 && oldIds.length <= rows.length && oldIds.every((id, index) => id === text(lines[index]?.id));
+      const newIds = [...nextElements.keys()];
+      const appendOnly = oldIds.length > 0 && oldIds.length <= rows.length && oldIds.every((id, index) => id === newIds[index]);
       if (appendOnly) for (const row of rows.slice(oldIds.length)) transcript.appendChild(row);
       else transcript.replaceChildren(...rows);
       lineElements = nextElements;
       if (!lines.length) transcript.appendChild(element('p', 'transcript-empty', 'まだ原文はありません'));
-      put('line-count', `${lines.length}件`);
       transcript.scrollTop = forceLatest || previousSession !== next.session?.id || nearBottom ? transcript.scrollHeight : scrollTop;
-      if (focusedId && lineElements.has(focusedId) && doc.activeElement !== lineElements.get(focusedId)) lineElements.get(focusedId).focus({preventScroll: true});
+      const focusedGroup = focusedId && groups.find(group => group.lines.some(line => text(line.id) === focusedId));
+      const focusedRow = focusedGroup && lineElements.get(text(focusedGroup.lines[0].id));
+      if (focusedRow && doc.activeElement !== focusedRow) focusedRow.focus({preventScroll: true});
     }
 
-    function renderItems(id, emptyId, items, lineIndex) {
+    function renderItems(id, emptyId, items) {
       const parent = $(id);
       parent.replaceChildren();
       let count = 0;
@@ -639,9 +814,6 @@
         if (!value) continue;
         const li = element('li');
         li.appendChild(element('p', '', value));
-        const sources = element('div', 'sources');
-        sourceButtons(sources, item.source_ids, lineIndex);
-        li.appendChild(sources);
         parent.appendChild(li);
         count++;
       }
@@ -652,47 +824,154 @@
       return JSON.stringify([state?.session?.id, item.through_seconds, item.generated_at, item.headline]);
     }
 
+    function rememberHistory(next, previous) {
+      const session = next.session?.id || null;
+      const cursor = next.demo?.cursor_seconds ?? next.demo?.at ?? next.capture.audio_seconds;
+      const previousCursor = previous?.demo?.cursor_seconds ?? previous?.demo?.at ?? previous?.capture?.audio_seconds;
+      if (historySession !== session || (next.demo && cursor < previousCursor)) {
+        historySession = session; historyItems = new Map(); historyCursor = null; historyHasMore = true;
+        historyLoading = false; historyGeneration++;
+        frozen = false; historySelection = null;
+        showHistoryNotice('');
+      }
+      for (const item of [...array(next.analysis_history), next.analysis?.result]) {
+        if (number(item?.through_seconds) && text(item?.headline?.text)) historyItems.set(historyKey(item), item);
+      }
+    }
+
+    function orderedHistory() {
+      return [...historyItems.values()].sort((a, b) => a.through_seconds - b.through_seconds
+        || (a.generated_at || 0) - (b.generated_at || 0));
+    }
+
+    async function navigateHistory(direction) {
+      let items = orderedHistory();
+      const key = historySelection?.key || (displayedState?.analysis?.result && historyKey(displayedState.analysis.result));
+      let index = items.findIndex(item => historyKey(item) === key);
+      if (direction < 0 && index === 0 && canLoadOlderHistory()) {
+        const generation = historyGeneration;
+        await loadOlderHistory();
+        const currentKey = historySelection?.key || (displayedState?.analysis?.result && historyKey(displayedState.analysis.result));
+        if (generation !== historyGeneration || currentKey !== key) return;
+        items = orderedHistory(); index = items.findIndex(item => historyKey(item) === key);
+      }
+      const target = index < 0 && direction < 0 ? items[items.length - 1] : items[index + direction];
+      if (target) selectHistory(target);
+    }
+
+    function canLoadOlderHistory() {
+      return !historyLoading && historyHasMore && !!state?.session && state?.capabilities?.analysis_history_paging === true && isFresh(state, connected, now());
+    }
+
+    function showHistoryNotice(value) {
+      if (value) message(value, 'warning');
+      else if (historyNotice && $('action-message').textContent === historyNotice) message('');
+      historyNotice = value;
+    }
+
+    function renderHistoryNavigation() {
+      const items = orderedHistory();
+      const key = historySelection?.key || (displayedState?.analysis?.result && historyKey(displayedState.analysis.result));
+      const index = items.findIndex(item => historyKey(item) === key);
+      $('previous-analysis-button').disabled = !items.length || (index === 0 && !canLoadOlderHistory());
+      $('next-analysis-button').disabled = index < 0 || index >= items.length - 1;
+      $('previous-analysis-button').setAttribute('aria-busy', String(historyLoading));
+      $('previous-analysis-button').title = historyLoading ? '以前の整理を読み込み中' : '前の整理';
+    }
+
+    async function loadOlderHistory() {
+      if (!canLoadOlderHistory()) return;
+      const session = state.session.id;
+      const generation = historyGeneration;
+      historyLoading = true; renderHistoryNavigation(); showHistoryNotice('');
+      try {
+        const query = new URLSearchParams({session_id: session, limit: '30'});
+        if (historyCursor) query.set('cursor', historyCursor);
+        else {
+          const dates = [...historyItems.values()].map(item => item.generated_at).filter(value => number(value) && value > 0);
+          if (dates.length) query.set('before', String(Math.min(...dates)));
+        }
+        const page = await fetchJSON(`/api/analysis-history?${query}`);
+        if (generation !== historyGeneration || state?.session?.id !== session) return;
+        if (page.session_id !== session || !Array.isArray(page.items)) throw new Error('履歴の形式を確認できません。');
+        for (const item of page.items) if (number(item?.through_seconds) && text(item?.headline?.text)) historyItems.set(historyKey(item), item);
+        historyCursor = text(page.next_cursor) || null;
+        historyHasMore = page.has_more === true && !!historyCursor;
+        const skipped = ['malformed', 'incomplete', 'missing_generated_at'].reduce((sum, key) =>
+          sum + (number(page.skipped?.[key]) ? page.skipped[key] : 0), 0);
+        if (skipped) showHistoryNotice(`未完了・形式不明の履歴 ${skipped}件は表示できません。`);
+        renderHistoryNavigation();
+        if (displayedState) renderConcepts(displayedState);
+      } catch (error) {
+        if (generation === historyGeneration) showHistoryNotice(`履歴を取得できません: ${error.message}`);
+      } finally {
+        if (generation === historyGeneration) { historyLoading = false; renderHistoryNavigation(); }
+      }
+    }
+
+    function renderConcepts(next) {
+      const panel = $('concepts-list');
+      const newSession = conceptSession !== (next.session?.id || null);
+      const previousTop = panel.scrollTop;
+      const previousHeight = panel.scrollHeight;
+      const oldKeys = newSession ? [] : [...conceptElements.keys()];
+      const result = next.analysis?.result;
+      const cutoff = next.analysis?.generated_at ?? result?.generated_at;
+      const through = next.analysis?.through_seconds ?? result?.through_seconds;
+      const snapshots = orderedHistory().filter(item => (item === result || historyKey(item) === (result && historyKey(result)))
+        || (number(cutoff) && number(item.generated_at) && item.generated_at <= cutoff && item.through_seconds <= through));
+      // Legacy snapshots may omit through_seconds on the result object.
+      if (result && !snapshots.includes(result)) snapshots.push(result);
+      const entries = new Map();
+      for (const item of snapshots) for (const concept of array(item.concepts)) {
+        if (!text(concept?.term) || !text(concept?.explanation)) continue;
+        const key = JSON.stringify([concept.term, concept.explanation, concept.basis, array(concept.source_ids)]);
+        if (!entries.has(key)) entries.set(key, {concept, through: item.through_seconds ?? through});
+      }
+      const rows = [];
+      const nextElements = new Map();
+      for (const [key, entry] of entries) {
+        const {concept} = entry;
+        const card = (!newSession && conceptElements.get(key)) || element('article', 'concept');
+        const signature = JSON.stringify(key);
+        if (card.dataset.signature !== signature) {
+          card.dataset.signature = signature;
+          const header = element('div', 'concept-header');
+          header.appendChild(element('h3', '', text(concept.term)));
+          card.replaceChildren(header, element('p', '', text(concept.explanation)));
+        }
+        nextElements.set(key, card); rows.push(card);
+      }
+      const keys = [...nextElements.keys()];
+      const appendOnly = !newSession && oldKeys.length <= keys.length && oldKeys.every((key, index) => key === keys[index]);
+      if (appendOnly) for (const row of rows.slice(oldKeys.length)) panel.appendChild(row);
+      else {
+        // Insert older cards without detaching the card being read or its selection.
+        for (let index = 0; index < rows.length; index++) if (panel.children[index] !== rows[index]) panel.insertBefore(rows[index], panel.children[index] || null);
+        while (panel.children.length > rows.length) panel.removeChild(panel.children[panel.children.length - 1]);
+      }
+      const prepended = oldKeys.length > 0 && keys.indexOf(oldKeys[0]) > 0;
+      panel.scrollTop = newSession ? panel.scrollHeight : previousTop + (prepended ? panel.scrollHeight - previousHeight : 0);
+      if (newSession || !oldKeys.length) conceptSeenCount = keys.length;
+      else if (prepended) conceptSeenCount += keys.indexOf(oldKeys[0]);
+      conceptSeenCount = Math.min(conceptSeenCount, keys.length);
+      conceptElements = nextElements; conceptSession = next.session?.id || null;
+      $('concepts-empty').hidden = rows.length > 0;
+      const added = Math.max(0, keys.length - conceptSeenCount);
+      $('concepts-latest-button').hidden = added === 0;
+      put('concepts-latest-button', '新しい説明へ');
+    }
+
     function selectHistory(item) {
       if (!state || !number(item?.through_seconds) || !text(item?.headline?.text)) return;
       historySelection = {key: historyKey(item), through_seconds: item.through_seconds, generated_at: item.generated_at};
       frozen = true;
-      frozenLiveSignature = contentSignature(state);
-      // Keep the evidence IDs exactly as generated then. Current ASR remains
-      // available for source jumps, without becoming input to that interpretation.
+      // Preserve the original interpretation and its source IDs at this time.
       const selected = {...state, analysis: {...state.analysis, through_seconds: item.through_seconds,
         generated_at: item.generated_at, result: item}};
       renderContent(selected, true);
-      renderHistory();
+      renderHistoryNavigation();
       renderControls();
-    }
-
-    function renderHistory() {
-      const history = array(state?.analysis_history).filter(item => number(item?.through_seconds) && text(item?.headline?.text)).slice(-60);
-      $('analysis-history').hidden = !history.length;
-      const signature = JSON.stringify([state?.session?.id, history]);
-      if (signature === renderedHistorySignature) {
-        for (const [key, button] of historyButtons) button.setAttribute('aria-pressed', String(historySelection?.key === key));
-        return;
-      }
-      const focusedKey = [...historyButtons.entries()].find(([, button]) => button === doc.activeElement)?.[0];
-      renderedHistorySignature = signature;
-      put('history-heading', `これまでの分析（${history.length}件）`);
-      $('history-list').replaceChildren();
-      historyButtons = new Map();
-      for (const item of history.slice().reverse()) {
-        const row = element('li');
-        const button = element('button', 'history-button');
-        button.type = 'button';
-        button.setAttribute('aria-pressed', String(historySelection?.key === historyKey(item)));
-        button.appendChild(element('span', 'history-time', formatTime(item.through_seconds)));
-        button.appendChild(element('span', 'history-headline', text(item.headline.text)));
-        button.title = `${formatTime(item.through_seconds)} までの発言に基づく分析を固定表示`;
-        button.addEventListener('click', () => selectHistory(item));
-        historyButtons.set(historyKey(item), button);
-        row.appendChild(button);
-        $('history-list').appendChild(row);
-      }
-      if (focusedKey && historyButtons.has(focusedKey)) historyButtons.get(focusedKey).focus({preventScroll: true});
     }
 
     function renderContent(next, forceLatest = false) {
@@ -702,68 +981,21 @@
       displayedState = next;
       renderedSignature = signature;
       const lines = array(next.lines);
-      const lineIndex = new Map(lines.map(line => [text(line.id), line]));
       const result = next.analysis?.result || {};
-      const evidenceIds = [...new Set([result.headline, ...array(result.flow), ...array(result.summary), ...array(result.concepts)]
-        .flatMap(item => array(item?.source_ids)).concat(array(result.source_ranges).map(range => range.source_id)).map(text).filter(Boolean))];
-      const interpretationSignature = JSON.stringify([next.session?.id, historySelection?.key, next.analysis?.provider, next.analysis?.through_seconds,
-        result.headline, result.flow, result.summary, result.concepts, result.source_ranges,
-        evidenceIds.map(id => [id, lineIndex.has(id), lineIndex.get(id)?.start_seconds])]);
-      // New raw speech must not collapse evidence a reader has opened on the right.
+      const interpretationSignature = JSON.stringify([next.session?.id, historySelection?.key, next.analysis?.provider,
+        next.analysis?.through_seconds, result.headline, result.summary]);
+      // New source speech does not rebuild the interpretation being read.
       if (interpretationSignature !== renderedInterpretationSignature) {
         renderedInterpretationSignature = interpretationSignature;
         const headline = text(result.headline?.text);
-        put('focus-heading', historySelection ? 'その時点の論点' : 'いまの論点');
+        put('focus-heading', historySelection ? 'その時点で伝えていたこと' : 'いま伝えていること');
         put('summary-heading', historySelection ? '当時の要点' : '直近の要点');
-        put('headline', headline || (next.analysis?.provider === 'off' ? '理解支援はオフです。原文を表示しています。' : '話のまとまりが届くと、いまの論点を表示します。'));
+        put('headline', headline || (next.analysis?.provider === 'off' ? '理解支援はオフです。原文を表示しています。' : '話のまとまりが届くと、いま伝えていることを表示します。'));
         $('headline').classList.toggle('empty', !headline);
-        $('headline-sources').replaceChildren();
-        sourceButtons($('headline-sources'), result.headline?.source_ids, lineIndex);
-        renderItems('flow-list', 'flow-empty', result.flow, lineIndex);
-        renderItems('summary-list', 'summary-empty', result.summary, lineIndex);
-        $('concepts-list').replaceChildren();
-        let conceptCount = 0;
-        for (const concept of array(result.concepts)) {
-          if (!text(concept?.term) || !text(concept?.explanation)) continue;
-          const card = element('article', 'concept');
-          const header = element('div', 'concept-header');
-          header.appendChild(element('h3', '', text(concept.term)));
-          const label = concept.basis === 'lecture' ? '講演に基づく説明' : (concept.basis === 'background' ? '背景補足' : '由来未確認');
-          const basis = element('span', 'basis', label);
-          basis.dataset.background = String(concept.basis !== 'lecture');
-          header.appendChild(basis);
-          card.appendChild(header);
-          card.appendChild(element('p', '', text(concept.explanation)));
-          const sources = element('div', 'sources');
-          sourceButtons(sources, concept.source_ids, lineIndex);
-          card.appendChild(sources);
-          $('concepts-list').appendChild(card);
-          conceptCount++;
-        }
-        $('concepts-empty').hidden = conceptCount > 0;
-        const through = next.analysis?.through_seconds;
-        put('analysis-caption', headline ? `${historySelection ? '履歴 · ' : ''}音声位置 ${formatTime(through)} 時点のAIの整理です。講演全体の振り返りは「これまでの分析」から確認できます。` : 'その時点までの発言をもとに更新します。');
-        $('analysis-coverage').hidden = !headline;
-        const ranges = array(result.source_ranges).filter(range => text(range?.source_id) && number(range?.start_seconds) && number(range?.end_seconds));
-        $('coverage-list').replaceChildren();
-        if (ranges.length) {
-          const first = Math.min(...ranges.map(range => range.start_seconds));
-          const last = Math.max(...ranges.map(range => range.end_seconds));
-          put('coverage-summary', `参照した発言 ${formatTime(first)}〜${formatTime(last)} · ${ranges.length}行（抜粋）`);
-          put('coverage-explanation', '範囲内の全発言を参照した意味ではありません。直近の発言に、必要な過去の根拠を加えた抜粋です。');
-          for (const range of ranges) {
-            const row = element('li');
-            row.appendChild(element('span', '', `${formatTime(range.start_seconds)}–${formatTime(range.end_seconds)}`));
-            sourceButtons(row, [range.source_id], lineIndex, false);
-            $('coverage-list').appendChild(row);
-          }
-        } else {
-          put('coverage-summary', '参照した発言の範囲は未記録');
-          put('coverage-explanation', 'この保存結果には参照範囲の記録がありません。各解説の出典ボタンから原文を確認してください。');
-        }
+        renderItems('summary-list', 'summary-empty', result.summary);
       }
-      renderTranslations(next, result, lines, lineIndex);
-      put('session-title', text(next.session?.title) || 'ライブの理解支援');
+      renderConcepts(next);
+      renderTranslations(next, result, lines);
       const mode = next.session?.source_kind === 'replay' ? '保存音声の逐次再生' : 'Mac マイク · 1ch';
       put('session-detail', next.session ? `${mode} · ${text(next.session.id)}` : '開始すると、原文と解説がここに届きます。');
       renderTranscript(next, lines, forceLatest, previousSession);
@@ -771,12 +1003,14 @@
 
     function acceptState(next) {
       if (!next || next.schema_version !== 1 || !next.capture || !next.asr || !next.analysis || !Array.isArray(next.lines)) throw new Error('サーバーの状態形式が対応していません。再読み込みしてください。');
+      const previous = state;
       state = next;
+      rememberHistory(next, previous);
       connected = true;
       connectionError = '';
       lastReceivedAt = now();
       if (!frozen) renderContent(state);
-      renderHistory();
+      renderHistoryNavigation();
       renderStatus();
     }
 
@@ -886,7 +1120,6 @@
 
     function freeze() {
       if (!displayedState) return;
-      if (!frozen) frozenLiveSignature = contentSignature(state);
       frozen = true;
       renderControls();
     }
@@ -894,12 +1127,12 @@
     function goLive() {
       frozen = false;
       historySelection = null;
-      frozenLiveSignature = '';
       if (state) renderContent(state, true);
-      renderHistory();
+      renderHistoryNavigation();
       renderControls();
     }
 
+    initializeSourceSplitter();
     $('start-button').addEventListener('click', () => recordAction('start'));
     $('stop-button').addEventListener('click', () => recordAction('stop'));
     $('devices-button').addEventListener('click', loadDevices);
@@ -907,6 +1140,13 @@
     $('translation-retry-button').addEventListener('click', retryTranslation);
     $('freeze-button').addEventListener('click', () => frozen ? goLive() : freeze());
     $('latest-button').addEventListener('click', goLive);
+    $('previous-analysis-button').addEventListener('click', () => navigateHistory(-1));
+    $('next-analysis-button').addEventListener('click', () => navigateHistory(1));
+    $('concepts-latest-button').addEventListener('click', () => {
+      $('concepts-list').scrollTop = $('concepts-list').scrollHeight;
+      conceptSeenCount = conceptElements.size; $('concepts-latest-button').hidden = true;
+    });
+    for (const kind of ['analysis', 'translation']) $(`${kind}-pause-retries`).addEventListener('click', () => pauseRetries(kind));
     $('provider-select').addEventListener('change', providerChanged);
     $('model-input').addEventListener('input', () => { providerSettingsTouched = true; renderProviderDetails(); saveIdlePreferences(); });
     $('device-select').addEventListener('change', () => { deviceSettingsTouched = true; renderControls(); saveIdlePreferences(); });
@@ -921,11 +1161,11 @@
       if (!disposed) tickTimer = setTimer(tick, 1000);
     }
     if (options.autoStart !== false) { pollLoop(); tick(); }
-    return {poll, loadDevices, freeze, goLive, recordAction, retryAnalysis, retryTranslation, acceptState, renderStatus,
-      dispose() { disposed = true; clearTimer(pollTimer); clearTimer(tickTimer); },
+    return {poll, loadDevices, freeze, goLive, recordAction, retryAnalysis, retryTranslation, pauseRetries, loadOlderHistory, acceptState, renderStatus,
+      dispose() { disposed = true; endSourceDrag(null, false); clearTimer(pollTimer); clearTimer(tickTimer); },
     };
   }
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = {formatTime, ageText, isFresh, capturePresentation, getControlState, translationMap, createApp};
+  if (typeof module !== 'undefined' && module.exports) module.exports = {formatTime, ageText, isFresh, capturePresentation, getControlState, translationMap, schedulePresentation, createApp};
   if (typeof document !== 'undefined') createApp(document, (...args) => fetch(...args));
 })();

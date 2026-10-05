@@ -23,6 +23,8 @@ class FakeApp:
         self.state = lecture_live.blank_state()
         self.state['lines'] = [{'text': '<script>private transcript</script>'}]
         self.mutations = []
+        self.lock = threading.RLock()
+        self.result_dir = None
 
     def snapshot(self):
         return deepcopy(self.state)
@@ -109,7 +111,7 @@ class LectureHTTPTest(unittest.TestCase):
         self.assertEqual([], self.app.mutations)
 
     def test_authentication_is_required_for_state_assets_and_mutation(self):
-        for path in ('/', '/api/state', '/api/identity', '/api/devices', '/app.js', '/style.css'):
+        for path in ('/', '/api/state', '/api/analysis-history', '/api/identity', '/api/devices', '/app.js', '/style.css'):
             with self.subTest(path=path):
                 self.assertEqual(403, self.request(path)[0])
         self.assertEqual(403, self.request('/?token=wrong')[0])
@@ -118,6 +120,43 @@ class LectureHTTPTest(unittest.TestCase):
         self.assertEqual(403, self.post('/api/start', authenticated=False)[0])
         self.assertEqual(403, self.post('/api/retry-translation', authenticated=False)[0])
         self.assertEqual([], self.app.mutations)
+
+    def test_persisted_history_pages_are_read_only_and_bound_to_current_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.app.result_dir = Path(directory)
+            self.app.state['session'] = {'id': 'synthetic-session'}
+            records = [{'through_seconds': i, 'generated_at': i,
+                        'headline': {'text': f'Synthetic {i}', 'source_ids': []}}
+                       for i in range(75)]
+            (self.app.result_dir / 'analysis-history.jsonl').write_text(
+                ''.join(json.dumps(row) + '\n' for row in records))
+            endpoint = '/api/analysis-history?session_id=synthetic-session&limit=60'
+            status, _, body = self.request(endpoint, authenticated=True)
+            self.assertEqual(200, status)
+            page = json.loads(body)
+            self.assertEqual(60, len(page['items']))
+            status, _, body = self.request(endpoint + '&cursor=' + page['next_cursor'], authenticated=True)
+            self.assertEqual(200, status)
+            self.assertEqual(15, len(json.loads(body)['items']))
+            self.assertEqual(409, self.request('/api/analysis-history?session_id=other', authenticated=True)[0])
+            self.assertEqual(400, self.request(endpoint + '&cursor=bad', authenticated=True)[0])
+            self.assertEqual([], self.app.mutations)
+            # A CLI-selected saved view can page without setting a writable result_dir.
+            self.app.history_result_dir, self.app.result_dir = self.app.result_dir, None
+            self.assertEqual(200, self.request(endpoint, authenticated=True)[0])
+            self.app.state['session'] = {'id': 'replacement'}
+            self.assertEqual(409, self.request(endpoint, authenticated=True)[0])
+
+    def test_history_session_change_during_read_discards_response(self):
+        self.app.state['session'] = {'id': 'old'}
+        self.app.result_dir = Path('/synthetic-only')
+        def switched(*args, **kwargs):
+            self.app.state['session'] = {'id': 'new'}
+            return {'session_id': 'old', 'items': [{'headline': {'text': 'Never publish'}}]}
+        with patch('lecture_history.read_history_page', side_effect=switched):
+            status, _, body = self.request('/api/analysis-history?session_id=old', authenticated=True)
+        self.assertEqual(409, status)
+        self.assertNotIn(b'Never publish', body)
 
     def test_authenticated_identity_is_read_only_and_marks_our_application(self):
         status, _, raw = self.request('/api/identity', authenticated=True)
