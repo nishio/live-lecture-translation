@@ -10,3 +10,22 @@ The [authorized 325.567-second comparison](../docs/experiments/asr-chunk-duratio
 
 
 The [architecture](../docs/architecture.md) remains authoritative for current live behavior. The [probe guide](../docs/asr-probe.md) describes explicit saved-audio experiments.
+
+## Uncertainty and translation eligibility are separate decisions
+
+After publishing the comparison, the user proposed filtering rule-identifiable junk from uncertain recognition and translating the remaining content with its uncertainty attached. The reason is semantic preservation: excessive uncertainty detection followed by blanket exclusion can remove a negation, condition, quantity, or qualification. This is a proposed policy, not a change to the live application.
+
+The current [translation planner](../audio-array/lecture_translation.py) excludes every uncertain line from translation targets, but can send those lines as nearby context. Its normalized source retains `uncertain` but drops `doubt_reasons`. The analysis selector excludes uncertain lines before building the request. Merely adding uncertain context does not require its meaning to appear in a target translation.
+
+The 15-second experiment had 15 uncertain lines containing 161 normalized tokens. Five lines, containing 79 tokens, were marked uncertain solely because model timestamps extended outside their audio chunk. This is not evidence that their text is wrong. Text review also found excluded negation-bearing lines. Counts describe this one recording and the current heuristics, not validated error rates.
+
+Separate three properties: the original recognition evidence, typed uncertainty, and the derived decision to include or suppress it in a translation request. Preserve source IDs, original text and every exclusion reason. A translation request should be able to include an uncertain target with an allowlisted reason; unsupported scores must not be presented as calibrated probabilities. Timing uncertainty and textual uncertainty should not be conflated. Translation output must retain unresolved wording or gaps rather than turning guesses into confident facts.
+
+| Candidate treatment | Constraint |
+| --- | --- |
+| Suppress or collapse evident generated loops | Compression ratio is a suspicion signal, not proof of duplicate speech. Define and validate the repetition rule; preserve the original records and distinguish genuine emphasis or repeated speech. |
+| Omit isolated nonsemantic fillers when the rule is reliable | Do not globally remove `so`, `thank you`, short responses, numbers, or negation. Context can make them meaningful. |
+| Include meaningful uncertain text with its reason | Protect negation, quantities, conditions, names, attribution, and incomplete but informative clauses. Re-recognition may help resolve them. |
+| Split or explicitly defer oversized text | Length alone is not a reason to discard content. Retain pending work and report input-limit failures. |
+
+The next implementation should use one eligibility policy for planning, pending counts, coverage, retry and completion, and should update normalized source fingerprints and request validation consistently. First compare candidate rules on saved recognition and synthetic counterexamples, including a negation with invalid timestamps, meaningful uses of `so`, long valid statements, actual repetitions, and hallucinated loops. Measure recovered meaningful content and mistaken exclusions separately. No filter thresholds, new translation calls, or quality improvement were established by this proposal.
