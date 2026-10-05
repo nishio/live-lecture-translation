@@ -19,7 +19,7 @@ class FakeAudio extends Element {
 }
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'lecture-dashboard/index.html'), 'utf8') + fs.readFileSync(path.join(root, 'lecture-demo/toolbar.html'), 'utf8');
-function fixture(overrides = {}, {realRenderer = false} = {}) {
+function fixture(overrides = {}, {realRenderer = false, transformSnapshot = null} = {}) {
   const doc = fixtureDOM(html), nodes = doc.nodes;
   const audio = new FakeAudio(); nodes.set('demo-audio', audio); const setup = new Element();
   const $ = id => {assert(nodes.has(id), `Missing real DOM element: ${id}`); return nodes.get(id);};
@@ -30,12 +30,13 @@ function fixture(overrides = {}, {realRenderer = false} = {}) {
   function snapshot(at) {
     const schedule = (interval, clock = 'wall') => ({state: 'waiting', reason: clock === 'audio' ? 'recording' : 'interval',
       remaining_seconds: interval - at % interval, interval_seconds: interval, wait_seconds: interval, clock});
-    return {schema_version: 1, updated_at: meta.started_at + at, session: {id: 'synthetic-replay', started_at: meta.started_at, source_kind: 'replay'},
+    const value = {schema_version: 1, updated_at: meta.started_at + at, session: {id: 'synthetic-replay', started_at: meta.started_at, source_kind: 'replay'},
       capture: {state: 'completed', audio_seconds: Math.min(at, 30)}, demo: {cursor_seconds: at}, headline: at >= 20 ? 'published' : 'empty', at,
       asr: {state: 'waiting', through_seconds: 0, queue_seconds: 0, schedule: schedule(15, 'audio')},
       translation: {enabled: true, state: 'waiting', blocks: [], schedule: schedule(60)},
       analysis: {state: 'waiting', through_seconds: 0, provider: 'openai', result: null, schedule: schedule(120)},
       lines: at >= 2 ? [{id: 'synthetic-line', start_seconds: 0, end_seconds: at, text: `Synthetic speech ${Math.floor(at)}`, language: 'en'}] : []};
+    return transformSnapshot ? transformSnapshot(value, at) : value;
   }
   const context = {document: doc, history: {replaceState() {}}, location: {pathname: '/'}, performance: {now: () => clock},
     setInterval(fn) {tick = fn;}, window: {LectureDemoRenderer: {createApp(_doc, transport, options) {
@@ -65,6 +66,16 @@ async function run() {
   assert.equal(nextPosition(20, 1, 1, 30), 21); assert.equal(nextPosition(24, 40, 1, 30), 30);
   assert.equal(audioPosition(12, 2, 35), 14); assert.equal(audioPosition(40, 2, 35), 35);
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'lecture-demo/toolbar.html'), 'utf8'), /demo-cost|demo-speed|demo-progress|demo-landmarks|費用|音声再生なし/);
+  // The synthetic DOM does not apply CSS. Check the real replay suppression
+  // rules too: hiding this node previously erased every first-source status.
+  const demoCSS = fs.readFileSync(path.join(root, 'lecture-demo/demo.css'), 'utf8');
+  const hiddenSelectors = [...demoCSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, , declarations]) => /\bdisplay\s*:\s*none\b/.test(declarations))
+    .flatMap(([, selectors]) => selectors.split(',').map(selector => selector.trim()));
+  assert.equal(hiddenSelectors.some(selector => /\.transcript-empty\b/.test(selector)), false, 'The actual replay CSS must keep first-source waiting/recognition/failure status visible');
+  for (const selector of ['.lecture-demo #translation-empty', '.lecture-demo #headline.empty', '.lecture-demo #summary-empty', '.lecture-demo #concepts-empty']) {
+    assert(hiddenSelectors.includes(selector), `Other empty reading areas remain quiet: ${selector}`);
+  }
   assert.match(html, /id="demo-slider"[^>]*step="any"/, 'The native range must not round its maximum below the final publication');
   const fractionalEnd = fixture({duration_seconds: 349.60897612571716}); await fractionalEnd.ready();
   fractionalEnd.seek(String(fractionalEnd.meta.duration_seconds));
@@ -73,11 +84,48 @@ async function run() {
   assert.equal(fractionalEnd.renderer.displayed.at, fractionalEnd.meta.duration_seconds, 'The final frame is reachable without starting playback');
 
   const silent = fixture(); await silent.ready();
+  assert.equal(silent.$('demo-mode').hidden, true, 'Missing historical provider settings cannot be inferred from empty translations');
+  const transcriptionOnly = fixture({configuration: {provider: 'off'}}); await transcriptionOnly.ready();
+  assert.equal(transcriptionOnly.$('demo-mode').hidden, false, 'The saved off-provider setting explicitly labels transcription-only playback');
+  assert.match(html, /id="demo-mode"[^>]*>文字起こしのみ<\/span>/);
+  const cloudPlayback = fixture({configuration: {provider: 'openai'}}); await cloudPlayback.ready();
+  assert.equal(cloudPlayback.$('demo-mode').hidden, true, 'Cloud playback does not gain the label while waiting for translations');
   assert.equal(silent.renderer.displayed.headline, 'empty');
   assert.equal(silent.$('demo-play').textContent, '▶ 再生', 'Playback always starts paused at the beginning');
   assert.equal(silent.setup.inert, true);
   await assert.rejects(() => silent.transport('/api/start', {method: 'POST'}), /処理要求を送信しません/);
   assert.equal(silent.audio.playCalls.length, 0, 'Opening the page never plays audio');
+
+  // Recorded first-publication timing is evidence, including an old cold start.
+  // The renderer must not manufacture words from a preparation/clock change.
+  for (const firstPublication of [3.8, 20]) {
+    const arrival = fixture({audio_url: '/audio.wav'}, {realRenderer: true, transformSnapshot(value, at) {
+      value.lines = [];
+      value.asr_preparation = {state: 'ready', started_at: 970, completed_at: 990, error: null};
+      value.provisional_asr = {enabled: true, state: at >= firstPublication ? 'completed' : at >= 3 ? 'running' : 'waiting',
+        refresh_seconds: 3, window_seconds: 15, revision: at >= firstPublication ? 1 : null,
+        through_seconds: at >= firstPublication ? 3 : 0, window_start_seconds: 0,
+        published_at: at >= firstPublication ? 1000 + firstPublication : null,
+        lines: at >= firstPublication ? [{id: 'p1-l0', text: 'Recorded first words.', start_seconds: 0, end_seconds: 3}] : [],
+        schedule: at >= 3 && at < firstPublication ? {state: 'busy', reason: 'request', clock: 'audio', interval_seconds: 3}
+          : {state: 'waiting', reason: 'recording', clock: 'audio', interval_seconds: 3, remaining_seconds: 3 - at % 3}};
+      return value;
+    }});
+    await arrival.ready();
+    assert.equal(arrival.audio.playCalls.length, 0);
+    assert.equal(arrival.$('asr-schedule-compact').textContent, '3秒');
+    assert.equal(arrival.$('provisional-lines').children.length, 0);
+    const begin = arrival.$('demo-play').click(); arrival.audio.playCalls.shift().resolve(); await begin;
+    arrival.audio.currentTime = firstPublication - .001; arrival.tick(firstPublication * 1000); await arrival.respond();
+    assert.equal(arrival.$('provisional-lines').children.length, 0);
+    assert.match(arrival.$('transcript').textContent, /最初の原文を認識/);
+    assert.doesNotMatch(arrival.$('asr-schedule-compact').textContent, /秒/);
+    arrival.audio.currentTime = firstPublication; arrival.tick(firstPublication * 1000 + 300); await arrival.respond();
+    assert.equal(arrival.$('provisional-lines').textContent, 'Recorded first words.');
+    assert.equal(arrival.$('transcript').children.at(-1), arrival.$('provisional-region'));
+    arrival.seek(0); await arrival.respond();
+    assert.equal(arrival.$('provisional-lines').children.length, 0, 'Rewind never leaks the future first publication');
+  }
   await silent.$('demo-play').click(); silent.tick(1000);
   assert.equal(silent.requests[0].at, 1, 'No-audio playback advances at exactly 1x');
   silent.tick(2000); silent.tick(3000);

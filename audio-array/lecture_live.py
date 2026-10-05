@@ -206,28 +206,69 @@ def bounded_analysis_input(lines, previous, *, include_block_translations=False,
 
 
 class LocalTranscriber:
-    """Reuse the pinned MLX model in one worker; hash weights once per session."""
+    """Reuse the pinned MLX model across workers; hash weights once per app."""
     def __init__(self, metadata=MODEL_METADATA):
         self.metadata_path = Path(metadata)
         self.model = None
+
+    def _check_model(self):
+        from transcribe_local import sha256
+        check_processing_allowed()
+        if self.model is None:
+            model = json.loads(self.metadata_path.read_text())
+            model_path = Path(model['local_path']).resolve()
+            weights = model_path / 'weights.safetensors'
+            if not weights.is_file():
+                weights = model_path / 'weights.npz'
+            paths = [self.metadata_path, weights, model_path / 'config.json']
+            identities = {str(p): (p.stat().st_size, p.stat().st_mtime_ns, sha256(p)) for p in paths}
+            check_processing_allowed()
+            self.model, self.identities = model, identities
+        for path, identity in self.identities.items():
+            observed = Path(path).stat()
+            if (observed.st_size, observed.st_mtime_ns) != identity[:2]:
+                raise ValueError('認識モデルが処理中に変更されました。')
+
+    def prepare(self, language):
+        """Load and exercise the same model cache before any real audio arrives.
+
+        One synthetic 3-second window, one decode, at most 32 sampled tokens.
+        No recognizer output is retained or admitted as source evidence.
+        """
+        self._check_model()
+        os.environ['HF_HUB_OFFLINE'] = '1'
+        os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
+        from local_inference import inference_slot
+        before = time.monotonic()
+        with inference_slot('lecture-asr-prepare', cancel=current_cancel_event()):
+            check_processing_allowed()
+            acquired = time.monotonic()
+            import numpy as np
+            import mlx.core as mx
+            from mlx_whisper.audio import log_mel_spectrogram, pad_or_trim, N_FRAMES, N_SAMPLES
+            from mlx_whisper.transcribe import ModelHolder
+            from mlx_whisper.decoding import decode, DecodingOptions
+            check_processing_allowed()
+            model = ModelHolder.get_model(self.model['local_path'], mx.float16)
+            check_processing_allowed()
+            mel = log_mel_spectrogram(np.zeros(3 * 16000, dtype=np.float32),
+                                     n_mels=model.dims.n_mels, padding=N_SAMPLES)
+            mel = pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16)
+            check_processing_allowed()
+            decode(model, mel, DecodingOptions(task='transcribe',
+                language=None if language == 'auto' else language, temperature=0., sample_len=32))
+        return {'input_kind': 'synthetic_silence', 'input_seconds': 3, 'max_decode_tokens': 32,
+                'retained_source_lines': 0, 'measured_api_usd': 0,
+                'inference_queue_wait_seconds': acquired - before,
+                'inference_seconds': time.monotonic() - acquired,
+                'model_file_sha256': {path: value[2] for path, value in self.identities.items()}}
 
     def __call__(self, chunk, destination, language):
         from transcribe_local import read_mono, sha256
         from local_inference import inference_slot
         check_processing_allowed()
         audio = read_mono(chunk['path'])
-        if self.model is None:
-            self.model = json.loads(self.metadata_path.read_text())
-            model_path = Path(self.model['local_path']).resolve()
-            weights = model_path / 'weights.safetensors'
-            if not weights.is_file():
-                weights = model_path / 'weights.npz'
-            paths = [self.metadata_path, weights, model_path / 'config.json']
-            self.identities = {str(p): (p.stat().st_size, p.stat().st_mtime_ns, sha256(p)) for p in paths}
-        for path, identity in self.identities.items():
-            observed = Path(path).stat()
-            if (observed.st_size, observed.st_mtime_ns) != identity[:2]:
-                raise ValueError('認識モデルが処理中に変更されました。')
+        self._check_model()
         os.environ['HF_HUB_OFFLINE'] = '1'
         os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
         before = time.monotonic()
@@ -256,7 +297,7 @@ class LectureApp:
                  transcriber=None, analyzer=None, capture_factory=None, allow_cloud=False, cloud_scope=None,
                  readiness=None, default_model=None, default_language='auto', continuous_translation=False,
                  translation_interval=60, translator=None,
-                 provisional_refresh_seconds=0, provisional_window_seconds=15):
+                 provisional_refresh_seconds=0, provisional_window_seconds=15, asr_preparer=None):
         self.data_root = Path(data_root or REPO / 'data/event-audio/mac-live')
         self.results_root = Path(results_root or REPO / 'results/event-audio/mac-live')
         from lecture_provisional import validate_settings
@@ -274,6 +315,13 @@ class LectureApp:
         self.translator_override = translator
         self.model_metadata = model_metadata
         self.transcriber_override = transcriber
+        self.transcriber = transcriber if transcriber is not None else LocalTranscriber(model_metadata)
+        self._asr_preparer = asr_preparer or (self.transcriber.prepare if transcriber is None else None)
+        self.preparation_thread = None
+        self.preparation_cancel = threading.Event()
+        self.asr_preparation = {'state': 'idle' if self._asr_preparer else 'ready',
+            'started_at': None, 'completed_at': None, 'duration_seconds': None,
+            'error': None, 'stop_requested': False, 'preparation_path': None}
         self.analyzer_override = analyzer
         self.capture_factory = capture_factory
         self.allow_cloud = allow_cloud
@@ -319,12 +367,15 @@ class LectureApp:
             schedules = {kind: self._schedule_locked(kind) for kind in ('analysis', 'translation')}
             result = deepcopy(self.state)
             result['updated_at'] = time.time()
+            preparation_alive = bool(self.preparation_thread and self.preparation_thread.is_alive())
+            if self.result_dir is not None or not self.state.get('session'):
+                result['asr_preparation'] = {**deepcopy(self.asr_preparation), 'worker_alive': preparation_alive}
             result['asr']['queue_seconds'] = max(0, result['capture']['audio_seconds'] - result['asr']['through_seconds'])
             result['asr']['schedule'] = self._asr_schedule_locked()
             if result.get('provisional_asr') is not None:
                 result['provisional_asr']['schedule'] = self._provisional_schedule_locked()
             cloud_alive = bool(self.cloud_worker and self.cloud_worker.is_alive())
-            result['processing_active'] = bool(cloud_alive or
+            result['processing_active'] = bool(preparation_alive or cloud_alive or
                 (self.worker and self.worker.is_alive() and not self.worker_finishing))
             result['analysis']['worker_alive'] = bool((cloud_alive and self.cloud_kind == 'analysis') or
                 (result['analysis']['provider'] == 'local' and result['analysis']['state'] == 'running'
@@ -711,6 +762,57 @@ class LectureApp:
             self.chunk_completed_at[chunk['index']] = chunk.get('completed_at')
             self.audio_queue.put(dict(chunk))
 
+    def prepare_asr(self):
+        """Asynchronous local-only preparation; never starts a source afterward."""
+        with self.lock:
+            if self.closing:
+                raise RuntimeError('アプリは終了処理中です。')
+            if self.state.get('session') and self.result_dir is None:
+                raise ValueError('保存結果の閲覧中は認識器を起動しません。')
+            if self.preparation_thread and self.preparation_thread.is_alive():
+                return self.snapshot()
+            if self.asr_preparation['state'] == 'ready':
+                return self.snapshot()
+            if self.state['capture']['state'] in ACTIVE or any(thread and thread.is_alive()
+                    for thread in (self.worker, self.source_thread, self.cloud_worker)):
+                raise RuntimeError('録音または処理が進行中です。')
+            self.preparation_cancel = threading.Event()
+            event = self.preparation_cancel
+            path = self.results_root / ('asr-preparation-' + uuid.uuid4().hex + '.json')
+            self.asr_preparation = {'state': 'preparing', 'started_at': time.time(),
+                'completed_at': None, 'duration_seconds': None, 'error': None,
+                'stop_requested': False, 'preparation_path': str(path), 'language': self.default_language}
+            def prepare():
+                before = time.monotonic()
+                try:
+                    atomic_json(path, deepcopy(self.asr_preparation))
+                    with processing_scope(event):
+                        check_processing_allowed()
+                        details = self._asr_preparer(self.default_language)
+                        check_processing_allowed()
+                    with self.lock:
+                        if event.is_set():
+                            raise ProcessingStopped('認識器の準備は停止されました。')
+                        self.asr_preparation.update(state='ready', details=details)
+                except (ProcessingStopped, InferenceCancelled):
+                    with self.lock:
+                        self.asr_preparation.update(state='paused', stop_requested=True)
+                except Exception as exc:
+                    with self.lock:
+                        self.asr_preparation.update(state='failed', error=str(exc)[:1000])
+                finally:
+                    with self.lock:
+                        if event.is_set() and self.asr_preparation['state'] != 'failed':
+                            self.asr_preparation.update(state='paused', stop_requested=True)
+                        self.asr_preparation.update(completed_at=time.time(), duration_seconds=time.monotonic() - before)
+                        try:
+                            atomic_json(path, deepcopy(self.asr_preparation))
+                        except OSError as exc:
+                            self.asr_preparation.update(state='failed', error='準備記録を保存できません: ' + str(exc)[:800])
+            self.preparation_thread = threading.Thread(target=prepare, name='lecture-asr-prepare', daemon=False)
+            self.preparation_thread.start()
+        return self.snapshot()
+
     def start(self, config, *, replay=None, replay_seconds=None, pace=1):
         if not isinstance(config, dict):
             raise ValueError('開始設定が不正です。')
@@ -734,6 +836,9 @@ class LectureApp:
                 raise RuntimeError('アプリは終了処理中です。')
             if self.inference_unconfirmed:
                 raise RuntimeError('前回のローカル推論の終了が未確認です。状態を確認してから再起動してください。')
+            if (self.asr_preparation['state'] != 'ready' or self.asr_preparation['stop_requested']
+                    or (self.preparation_thread and self.preparation_thread.is_alive())):
+                raise ValueError('音声認識の準備が完了してから開始してください。録音はまだ始まっていません。')
             if (self.state['capture']['state'] in ACTIVE or (self.worker and self.worker.is_alive())
                     or (self.cloud_worker and self.cloud_worker.is_alive())
                     or (self.source_thread and self.source_thread.is_alive())
@@ -804,7 +909,7 @@ class LectureApp:
                     atomic_json(self.result_dir / 'cloud-baseline.json',
                                 {'request_keys_before': sorted(self.cloud_baseline_keys)})
                 self._cost_report()
-                self.transcriber = self.transcriber_override or LocalTranscriber(self.model_metadata)
+                atomic_json(self.result_dir / 'asr-preparation.json', deepcopy(self.asr_preparation))
                 self.persist(force=True)
                 self.worker = threading.Thread(target=self._process, name='lecture-processing', daemon=False)
                 self.source_thread = threading.Thread(target=self._replay if replay else self._microphone,
@@ -925,6 +1030,18 @@ class LectureApp:
 
     def stop(self):
         with self.lock:
+            preparation_alive = bool(self.preparation_thread and self.preparation_thread.is_alive())
+            # A stop displayed during preparation can arrive just after that
+            # thread exits. Preserve it until source admission, too.
+            prepared_without_session = (not self.state.get('session')
+                and self.asr_preparation['state'] == 'ready'
+                and self.asr_preparation.get('started_at') is not None)
+            if preparation_alive or prepared_without_session:
+                self.preparation_cancel.set()
+                self.asr_preparation['stop_requested'] = True
+                if self.asr_preparation['state'] == 'ready':
+                    self.asr_preparation['state'] = 'paused'
+                    atomic_json(self.asr_preparation['preparation_path'], deepcopy(self.asr_preparation))
             if self.result_dir is None:
                 return self.snapshot()  # Saved-result views own no processing to stop.
             self.stop_source.set()
@@ -1738,6 +1855,9 @@ class LectureApp:
     def close(self, timeout=20):
         with self.lock:
             self.closing = True
+            self.preparation_cancel.set()
+            if self.preparation_thread and self.preparation_thread.is_alive():
+                self.asr_preparation['stop_requested'] = True
             self.stop_source.set()
             self.abort_processing.set()
             if self.state['capture']['state'] in ACTIVE:
@@ -1745,11 +1865,11 @@ class LectureApp:
         if self.readiness:
             self.readiness.close()
         deadline = time.monotonic() + timeout
-        for thread in (self.source_thread, self.worker, self.cloud_worker):
+        for thread in (self.preparation_thread, self.source_thread, self.worker, self.cloud_worker):
             if thread:
                 thread.join(max(0, deadline - time.monotonic()))
         complete = not any(thread and thread.is_alive()
-                           for thread in (self.source_thread, self.worker, self.cloud_worker))
+                           for thread in (self.preparation_thread, self.source_thread, self.worker, self.cloud_worker))
         if self.recorder:
             observed = self.recorder.snapshot()
             complete = complete and observed.get('stop_confirmed', False) and observed.get('callbacks_confirmed', False)
@@ -1863,7 +1983,9 @@ def make_server(app, port=8776):
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError('JSONオブジェクトが必要です。')
-                if self.path == '/api/start':
+                if self.path == '/api/prepare-asr':
+                    result = app.prepare_asr()
+                elif self.path == '/api/start':
                     result = app.start(payload)
                 elif self.path == '/api/stop':
                     result = app.stop()
@@ -1980,20 +2102,31 @@ def main():
     thread.start()
     if args.open:
         webbrowser.open(url)
-    if args.replay:
-        replay_model = args.model or ('gpt-6.1-sol' if args.provider == 'openai' else 'qwen3:4b')
-        app.start({'language': language, 'provider': args.provider, 'model': replay_model},
-                  replay=args.replay, replay_seconds=args.duration, pace=args.pace)
+    replay_pending = bool(args.replay)
+    if not args.view_session:
+        app.prepare_asr()
     try:
-        while not stop.wait(.5):
-            if args.exit_after_replay and args.replay and app.source_done.is_set() and not app.worker.is_alive():
+        while not stop.wait(.1):
+            if replay_pending:
+                with app.lock:
+                    preparation = app.asr_preparation['state']
+                    preparing = bool(app.preparation_thread and app.preparation_thread.is_alive())
+                    if not preparing:
+                        if preparation != 'ready' or app.asr_preparation['stop_requested']:
+                            break
+                        replay_model = args.model or ('gpt-6.1-sol' if args.provider == 'openai' else 'qwen3:4b')
+                        app.start({'language': language, 'provider': args.provider, 'model': replay_model},
+                                  replay=args.replay, replay_seconds=args.duration, pace=args.pace)
+                        replay_pending = False
+            if (args.exit_after_replay and args.replay and not replay_pending
+                    and app.source_done.is_set() and not app.worker.is_alive()):
                 break
     finally:
         complete = app.close(timeout=130)
         server.shutdown()
         server.server_close()
     state = app.snapshot()
-    if not complete or (args.exit_after_replay and any(state[name]['state'] in {'failed', 'paused'}
+    if not complete or replay_pending or (args.exit_after_replay and any(state[name]['state'] in {'failed', 'paused'}
                                                     for name in ('capture', 'asr', 'analysis', 'translation'))):
         raise SystemExit(2)
 

@@ -18,7 +18,7 @@ The aim is to help you follow the lecture with less effort: quickly grasp what i
 
 Transcription data is saved locally. If a coding agent such as Codex can access those files, you can ask questions about the lecture in the agent's chat, such as “Summarize the discussion so far” or “How did the speaker explain this concept?” Specify the transcript file or its saved location when asking.
 
-The latest original speech appears at the end of 「原文」, refreshed about every three seconds using up to 15 seconds of recent audio. Its wording may change; earlier recognition of overlapping speech remains available under 「前の認識を見る」. Saved source lines and translation use separate 15-second recognition chunks. Initialization, recognition and queueing add delay. Translation normally runs at roughly 60-second intervals, and key points and concept explanations at 120-second intervals; updates may take longer. See the [operation guide](docs/operation.md) for controls and processing details.
+The latest original speech appears at the end of 「原文」, refreshed about every three seconds using up to 15 seconds of recent audio. Its wording may change; earlier recognition of overlapping speech remains available under 「前の認識を見る」. Saved source lines and translation use separate 15-second recognition chunks. The app prepares the recognizer before recording can begin; recognition and queueing can still add delay. Translation normally runs at roughly 60-second intervals, and key points and concept explanations at 120-second intervals; updates may take longer. See the [operation guide](docs/operation.md) for controls and processing details.
 
 The dashboard is in Japanese and is designed to support English lecture listening with Japanese text. Automatic language detection and Japanese recognition are also available; Japanese source lines are not translated into Japanese.
 
@@ -65,7 +65,7 @@ With your API key set in the `OPENAI_API_KEY` environment variable, run the foll
 ./start.command --cloud --authorization config/authorization.json
 ```
 
-The first command checks startup prerequisites; the second opens the dashboard. Select your audio input and press the recording start button. Allow microphone access when macOS requests it.
+The first command checks startup prerequisites; the second opens the dashboard and prepares the speech recognizer locally. Wait for preparation to finish, select your audio input, and press the recording start button. Preparation does not record microphone audio. Allow microphone access when macOS requests it.
 
 Without `--cloud`, a local LLM through Ollama can generate translations, key points and concept explanations. Install and run Ollama and the selected model separately. Local processing needs no API key and keeps audio and recognized text on your Mac. However, evaluation of the default **`qwen3:4b` found incorrect translations and relationships between ideas, falling short of the quality needed for lecture understanding**. This finding applies to the evaluated model and settings, not to every local LLM. The cloud configuration above is currently recommended.
 

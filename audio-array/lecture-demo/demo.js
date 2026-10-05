@@ -144,6 +144,7 @@
       meta = await response.json();
       if (!response.ok) throw new Error(meta.error || '保存記録を取得できませんでした。');
       if (!Number.isFinite(meta.started_at) || !Number.isFinite(meta.duration_seconds) || meta.duration_seconds < 0) throw new Error('再生時間を確認できません。');
+      $('demo-mode').hidden = meta.configuration?.provider !== 'off';
       meta.audio_start_seconds = Math.max(0, Number(meta.audio_start_seconds) || 0);
       meta.audio_seconds = Math.max(0, Number(meta.audio_seconds) || 0);
       history.replaceState(null, '', location.pathname);

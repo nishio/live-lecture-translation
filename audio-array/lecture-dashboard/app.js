@@ -46,11 +46,14 @@
 
   function getControlState(state, connected, now, hasDevice, pending) {
     const active = ACTIVE_CAPTURE.has(state?.capture?.state);
-    const processing = state?.processing_active === true || state?.processing_stop_status === 'stopping'
+    const preparing = state?.asr_preparation?.state === 'preparing';
+    const preparationNotReady = !!state?.asr_preparation && state.asr_preparation.state !== 'ready';
+    const processing = preparing || state?.processing_active === true || state?.processing_stop_status === 'stopping'
       || BUSY_WORK.has(state?.asr?.state) || BUSY_WORK.has(state?.analysis?.state) || BUSY_WORK.has(state?.translation?.state);
     return {
-      startDisabled: !isFresh(state, connected, now) || !hasDevice || active || processing || !!pending || ['checking', 'blocked'].includes(state?.preflight?.state),
-      stopDisabled: !(active || (state?.session && !state?.demo && processing)) || state?.processing_stop_requested === true || !!pending,
+      startDisabled: !isFresh(state, connected, now) || !hasDevice || active || processing || preparationNotReady || !!pending || ['checking', 'blocked'].includes(state?.preflight?.state),
+      stopDisabled: !(active || preparing || (state?.session && !state?.demo && processing))
+        || (preparing ? state.asr_preparation.stop_requested === true : state?.processing_stop_requested === true) || !!pending,
       settingsDisabled: active || processing || !!pending,
     };
   }
@@ -182,6 +185,7 @@
     let renderedSignature = '';
     let lineElements = new Map();
     let renderedTranscriptSignature = '';
+    let transcriptEmptyElement = null;
     let renderedProvisionalSignature = '';
     // These nodes move into the one transcript scroller when needed. Keep
     // references while detached; they are never a second reading pane.
@@ -456,9 +460,15 @@
       const providerLabel = $('provider-select').value === 'off' ? '原文のみ' : modelLabel;
       const preparing = ['checking', 'blocked'].includes(state?.preflight?.state) ? ' · 準備を確認' : '';
       put('settings-summary', [inputLabel, languageLabel, providerLabel].filter(Boolean).join(' · ') + preparing);
-      put('start-button', pending?.kind === 'start' ? (pending.phase === 'sending' ? '開始を要求中…' : '開始結果を確認中…') : '● 録音を開始');
+      const preparation = state?.asr_preparation;
+      put('start-button', pending?.kind === 'start' ? (pending.phase === 'sending' ? '開始を要求中…' : '開始結果を確認中…')
+        : preparation?.state === 'preparing' ? '音声認識を準備中…' : '● 録音を開始');
+      $('preparation-retry-button').hidden = !['failed', 'paused'].includes(preparation?.state);
+      $('preparation-retry-button').disabled = !!pending || !isFresh(state, connected, now());
+      put('preparation-retry-button', pending?.kind === 'prepare' ? '準備の再試行を確認中…' : '準備を再試行');
       put('stop-button', pending?.kind === 'stop' ? (pending.phase === 'sending' ? '停止を要求中…' : '停止を確認中…')
-        : (state?.processing_stop_requested === true ? (state.processing_stop_status === 'stopped' ? '停止済み' : '停止を確認中…') : '録音・処理を停止'));
+        : (preparation?.state === 'preparing' ? (preparation.stop_requested ? '準備の停止を確認中…' : '準備を停止')
+          : (state?.processing_stop_requested === true ? (state.processing_stop_status === 'stopped' ? '停止済み' : '停止を確認中…') : '録音・処理を停止')));
       $('retry-button').hidden = stopRequested() || state?.analysis?.state !== 'failed' || state?.analysis?.provider === 'off'
         || state?.analysis?.schedule?.reason === 'retry';
       $('retry-button').disabled = stopRequested() || retryBusy || !isFresh(state, connected, now());
@@ -473,6 +483,7 @@
     function renderStatus() {
       const current = now();
       const fresh = isFresh(state, connected, current);
+      renderEmptyTranscriptStatus(fresh);
       showText('connection-warning', !fresh && state ? `現在の録音状態は不明です。通信の途絶は、録音の停止を意味しません。${connectionError ? `\n${connectionError}` : '\n最新の状態を取得しています。'}` : (!connected && connectionError ? `サーバーに接続できません。${connectionError}` : ''));
       const capture = state?.capture || {};
       const asr = state?.asr || {};
@@ -543,7 +554,17 @@
       const waitingForWorker = (state?.processing_active === true || state?.processing_stop_status === 'stopping') && !ACTIVE_CAPTURE.has(capture.state);
       const preflightWait = ['checking', 'blocked'].includes(state?.preflight?.state) && !ACTIVE_CAPTURE.has(capture.state);
       const cloudInFlight = analysis.provider === 'openai' && ['analysis', 'translation'].some(kind => state[kind]?.state === 'running' || state[kind]?.worker_alive === true);
-      put('setup-hint', stopRequested() && cloudInFlight
+      const preparation = state?.asr_preparation;
+      const preparationOnly = !!preparation && !session;
+      const preparationMessage = preparationOnly ? ({
+        idle: '音声認識の準備を待っています。録音はまだ始まっていません。',
+        preparing: preparation.stop_requested ? '準備の停止を確認しています。録音はまだ始まっていません。' : '音声認識を準備しています。録音はまだ始まっていません。',
+        ready: '音声認識の準備ができました。録音は開始ボタンを押してから始まります。',
+        failed: '音声認識を準備できませんでした。準備を再試行してください。録音はまだ始まっていません。',
+        paused: '音声認識の準備を停止しました。再試行すると録音の準備をやり直します。',
+      })[preparation.state] : '';
+      showText('preparation-error', preparationOnly ? text(preparation.error) : '');
+      put('setup-hint', preparationMessage ? (fresh ? preparationMessage : '音声認識の準備状態を確認できません。最新の状態を待っています。') : stopRequested() && cloudInFlight
         ? '開始済みのAPI処理の終了を待っています。送信済みの要求は取り消せず、料金が発生することがあります。'
         : (waitingForWorker ? '前のセッションの処理終了を確認するまで、新しい録音は開始できません。録音・認識・分析の状態を確認してください。' : (preflightWait ? '下の準備確認が終わると録音を開始できます。問題がある項目を確認してください。' : (session?.source_kind === 'replay' ? '保存済み音声の逐次再生です。Macのマイクは使用していません。' : 'Macのマイクから音声を保存します。録音はボタンを押してから始まります。'))));
       renderPreflight(fresh, current);
@@ -675,9 +696,11 @@
       $('preflight-details').hidden = !preflight;
       if (!preflight) return;
       const warnings = array(preflight.checks).filter(check => check.state === 'warning').length;
-      const label = !fresh ? '現在の準備状態は不明' : ({ready: warnings ? '録音可能・解析の注意あり' : '録音の準備ができています', checking: '録音の準備を確認中', blocked: '録音の準備に問題があります'})[preflight.state] || '準備状態は不明';
+      const preparation = state?.asr_preparation;
+      const preparationLabel = ({idle: '音声認識の準備待ち', preparing: '音声認識を準備中', failed: '音声認識の準備に問題があります', paused: '音声認識の準備を停止'})[preparation?.state];
+      const label = !fresh ? '現在の準備状態は不明' : preparationLabel || ({ready: warnings ? '録音可能・解析の注意あり' : '録音の準備ができています', checking: '録音の準備を確認中', blocked: '録音の準備に問題があります'})[preflight.state] || '準備状態は不明';
       put('preflight-summary', `準備確認: ${label}`);
-      $('preflight-summary').dataset.tone = !fresh || preflight.state !== 'ready' || warnings ? 'warning' : 'good';
+      $('preflight-summary').dataset.tone = !fresh || preparationLabel || preflight.state !== 'ready' || warnings ? 'warning' : 'good';
       put('preflight-message', [text(preflight.message), preflight.checked_at ? `確認 ${ageText(preflight.checked_at, current)}` : ''].filter(Boolean).join(' · '));
       const signature = JSON.stringify(preflight.checks);
       if (signature !== preflightSignature) {
@@ -811,6 +834,27 @@
       return {preview, lines, error};
     }
 
+    function renderEmptyTranscriptStatus(fresh) {
+      if (frozen || !transcriptEmptyElement || transcriptEmptyElement.parentNode !== $('transcript')) return;
+      let label = 'まだ原文はありません';
+      const preparation = state?.asr_preparation;
+      const stage = state?.provisional_asr?.enabled ? state.provisional_asr : state?.asr;
+      if (state && !fresh) label = '原文の状態を確認しています。';
+      else if (!state?.session && preparation) {
+        label = ({preparing: preparation.stop_requested ? '音声認識の準備を停止しています。' : '音声認識を準備しています。録音はまだ始まっていません。',
+          ready: '録音を開始すると、原文をここに表示します。',
+          failed: '音声認識を準備できませんでした。準備を再試行してください。',
+          paused: '音声認識の準備を停止しました。', idle: '音声認識の準備を待っています。'})[preparation.state] || label;
+      } else if (state?.session) {
+        if (state.processing_stop_requested || stage?.state === 'paused') label = '原文はまだありません。処理は停止しています。';
+        else if (stage?.schedule?.state === 'busy') label = stage.schedule.reason === 'request' ? '最初の原文を認識しています。' : '最初の原文の認識待ちです。';
+        else if (stage?.state === 'failed' || stage?.error) label = '原文の認識に失敗しました。処理状態を確認してください。';
+        else if (ACTIVE_CAPTURE.has(state.capture?.state)) label = state.capture.audio_seconds > 0 ? '音声を受信しています。原文が届くとここに表示します。' : '音声の到着を待っています。';
+        else if (state.demo) label = 'この時点までに原文はありません。';
+      }
+      transcriptEmptyElement.textContent = label;
+    }
+
     function renderProvisional(next, {preview, lines, error}) {
       previewNode('provisional-region').hidden = !lines.length && !error;
       const paused = preview?.state !== 'running' && (preview?.state === 'paused' || !!error);
@@ -888,7 +932,8 @@
       if (overlappingRows.length) rows.push(overlap);
       renderProvisional(next, provisional);
       if (!previewNode('provisional-region').hidden) rows.push(previewNode('provisional-region'));
-      if (!rows.length) rows.push(element('p', 'transcript-empty', 'まだ原文はありません'));
+      transcriptEmptyElement = !rows.length ? element('p', 'transcript-empty', 'まだ原文はありません') : null;
+      if (transcriptEmptyElement) rows.push(transcriptEmptyElement);
       reconcileRows(transcript, rows);
       lineElements = nextElements;
       const focusedGroup = focusedId && groups.find(group => group.lines.some(line => text(line.id) === focusedId));
@@ -896,6 +941,7 @@
       if (focusedRow && overlap.contains(focusedRow)) overlap.open = true;
       transcript.scrollTop = forceLatest || previousSession !== next.session?.id || nearBottom ? transcript.scrollHeight : scrollTop;
       if (focusedRow && doc.activeElement !== focusedRow) focusedRow.focus({preventScroll: true});
+      renderEmptyTranscriptStatus(isFresh(state, connected, now()));
     }
 
     function renderItems(id, emptyId, items) {
@@ -1118,9 +1164,17 @@
           if (pending?.phase === 'reconcile' && sequence >= pending.minPoll && isFresh(state, connected, now())) {
             const action = pending.kind;
             const actionError = pending.error;
+            const preparationStop = pending.preparationStop;
             const status = state.capture.state;
             pending = null;
             if (action === 'start') message(ACTIVE_CAPTURE.has(status) ? '録音の開始を確認しました。' : (actionError || '開始要求後の状態を取得しました。録音の状態欄を確認してください。'), ACTIVE_CAPTURE.has(status) ? 'good' : 'warning');
+            else if (action === 'prepare') message(state.asr_preparation?.state === 'preparing'
+              ? '音声認識を準備しています。録音はまだ始まっていません。'
+              : (state.asr_preparation?.state === 'ready' ? '音声認識の準備ができました。録音を開始できます。' : actionError || '音声認識の準備状態を確認してください。'));
+            else if (preparationStop) message(state.asr_preparation?.state === 'paused'
+              ? '音声認識の準備を停止しました。録音は始めていません。'
+              : (state.asr_preparation?.stop_requested ? '準備の停止を要求済みです。開始済みの処理の終了を待っています。'
+                : (state.asr_preparation?.state === 'ready' ? '音声認識の準備は完了しています。録音は始めていません。' : actionError || '音声認識の準備状態を確認してください。')));
             else if (state.processing_stop_requested === true) message(state.processing_stop_status === 'stopped'
               ? (status === 'failed' ? '処理は停止しました。録音・保存の失敗と未処理分は残っています。' : '録音と新しい処理の停止を確認しました。未処理分は残しています。')
               : '新しい処理を停止しました。音声の保存と開始済みの処理の終了を確認しています。', status === 'failed' ? 'warning' : undefined);
@@ -1168,17 +1222,20 @@
     }
 
     async function recordAction(kind) {
+      if (!['start', 'stop', 'prepare'].includes(kind)) return;
       const control = getControlState(state, connected, now(), !!$('device-select').value, pending);
       if ((kind === 'start' && control.startDisabled) || (kind === 'stop' && control.stopDisabled)) return;
+      if (kind === 'prepare' && (pending || !isFresh(state, connected, now()) || !['failed', 'paused'].includes(state?.asr_preparation?.state))) return;
       if (kind === 'start' && $('provider-select').value === 'openai' && state?.capabilities?.cloud_enabled !== true) { message('この起動ではクラウド解析は有効になっていません。', 'warning'); return; }
       if (kind === 'start') { saveIdlePreferences(); goLive(); }
-      pending = {kind, phase: 'sending', minPoll: Infinity};
-      message(kind === 'start' ? '録音の開始を要求しています…' : '録音と新しい処理の停止を要求しています…');
+      pending = {kind, phase: 'sending', minPoll: Infinity, preparationStop: kind === 'stop' && state?.asr_preparation?.state === 'preparing'};
+      message(kind === 'prepare' ? '音声認識の準備を再試行しています…' : kind === 'start' ? '録音の開始を要求しています…'
+        : pending.preparationStop ? '音声認識の準備の停止を要求しています…' : '録音と新しい処理の停止を要求しています…');
       renderStatus();
       const body = kind === 'start' ? {device: $('device-select').value, language: $('language-select').value, provider: $('provider-select').value} : {};
       if (kind === 'start' && $('model-input').value.trim() && body.provider !== 'off') body.model = $('model-input').value.trim();
       try {
-        await fetchJSON(`/api/${kind}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+        await fetchJSON(`/api/${kind === 'prepare' ? 'prepare-asr' : kind}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
       } catch (error) {
         pending.error = error.confirmed ? `要求に失敗しました: ${error.message}` : '操作の応答を受信できませんでした。実際の状態を確認してください。';
         message(error.confirmed ? pending.error : '操作の応答を受信できませんでした。重複操作を防ぐため、実際の状態を確認しています。', 'warning');
@@ -1230,6 +1287,7 @@
 
     initializeSourceSplitter();
     $('start-button').addEventListener('click', () => recordAction('start'));
+    $('preparation-retry-button').addEventListener('click', () => recordAction('prepare'));
     $('stop-button').addEventListener('click', () => recordAction('stop'));
     $('devices-button').addEventListener('click', loadDevices);
     $('retry-button').addEventListener('click', retryAnalysis);

@@ -27,8 +27,9 @@
       <details id="preflight-details" class="preflight-details" hidden><summary id="preflight-summary">準備確認</summary><p id="preflight-message"></p><ul id="preflight-checks"></ul></details>
       <details id="agenda-card" class="agenda-card" hidden><summary id="agenda-heading">当日の予定</summary><ol id="agenda-list" class="agenda-list"></ol><p class="section-caption">予定の表示のみ。録音は自動で開始・停止しません。</p></details>
       </details>
-      <div class="record-actions"><button id="start-button" class="button primary" type="button" disabled><span aria-hidden="true">●</span> 録音を開始</button><button id="stop-button" class="button stop" type="button" aria-describedby="stop-hint" disabled>録音・処理を停止</button></div>
+      <div class="record-actions"><button id="start-button" class="button primary" type="button" disabled><span aria-hidden="true">●</span> 録音を開始</button><button id="preparation-retry-button" class="button secondary" type="button" hidden>準備を再試行</button><button id="stop-button" class="button stop" type="button" aria-describedby="stop-hint" disabled>録音・処理を停止</button></div>
       <p id="setup-hint" class="setup-hint">録音は開始ボタンを押してから始まります。</p>
+      <p id="preparation-error" class="error-text" hidden></p>
       <p id="stop-hint" class="setup-hint">停止すると、新しい文字起こし・翻訳・分析を止めます。保存済みの録音と結果は残ります。</p>
       <p id="local-quality-note" class="quality-note">ローカル解析は実験中：訳や話の関係の取り違えが確認されています。</p>
       <p id="devices-error" class="error-text" hidden></p>

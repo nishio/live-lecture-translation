@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-05",
+  "record_type": "new_realtime_saved_audio_asr_startup_validation",
+  "validation_status": "passed_asr_startup_and_continuing_publication",
+  "source": "Audrey Tang, Plurality, Code for Japan, Seoul 2023",
+  "source_url": "https://www.youtube.com/watch?v=4_tge6XJhGA",
+  "attribution_reference": "../../samples/audrey-plurality-seoul-2023/README.md#出典と帰属",
+  "license_notice": "Source video labeled CC BY; metadata does not identify a license version.",
+  "asr_model": "mlx-community/whisper-large-v3-turbo",
+  "asr_model_revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb",
+  "configuration": {
+    "provider": "off",
+    "language": "en",
+    "pace": "realtime",
+    "chunk_seconds": 15,
+    "provisional_refresh_seconds": 3,
+    "provisional_window_seconds": 15,
+    "new_process_per_run": true,
+    "prepared_recognizer_reused_in_same_process": true
+  },
+  "preparation": {
+    "before_session_start": true,
+    "input_kind": "synthetic_silence",
+    "input_seconds": 3,
+    "max_decode_tokens": 32,
+    "retained_source_lines": 0
+  },
+  "acceptance": {
+    "first_nonempty_publication_limit_seconds": 6,
+    "first_nonempty_reference": "Actual audio supply start; session-relative observations include pre-supply startup overhead and are conservative upper bounds.",
+    "continuing_updates_required": true,
+    "combined_verdict": "passed_for_two_local_asr_runs"
+  },
+  "runs": [
+    {
+      "label": "45-second pilot",
+      "completion_confirmed": true,
+      "input_seconds": 45,
+      "input_sha256": "0ba5e33d7717b7315468c08271dc13f786f377e1c068cdc42efbbbefd9b0e750",
+      "preparation_seconds": 12.05923016599263,
+      "first_nonempty_publication_seconds_from_session_start": 4.235553026199341,
+      "first_canonical_publication_seconds_from_session_start": 16.116700887680054,
+      "preview_count": 12,
+      "canonical_chunk_count": 3,
+      "canonical_line_count": 7,
+      "eligible_source_count": 7,
+      "combined_publication_interval_count": 14,
+      "combined_publication_interval_median_seconds": 2.9569844007492065,
+      "combined_publication_interval_max_seconds": 3.7488162517547607,
+      "preview_ready_to_publication_median_seconds": 1.0253220796585083,
+      "preview_ready_to_publication_max_seconds": 1.656810998916626,
+      "last_publication_seconds_from_session_start": 46.110307931900024,
+      "translation_result_count": 0,
+      "analysis_result_count": 0,
+      "new_api_request_count": 0,
+      "additional_api_usd": 0
+    },
+    {
+      "label": "full recording",
+      "completion_confirmed": true,
+      "input_seconds": 325.567,
+      "input_sha256": "da7a7c8202a28b24e3a24a0bcfd7f4da0a786c30884975101d60a876c34301f3",
+      "preparation_seconds": 8.125184999982594,
+      "first_nonempty_publication_seconds_from_session_start": 4.2061851024627686,
+      "first_canonical_publication_seconds_from_session_start": 16.149966955184937,
+      "preview_count": 87,
+      "canonical_chunk_count": 22,
+      "canonical_line_count": 62,
+      "eligible_source_count": 59,
+      "combined_publication_interval_count": 108,
+      "combined_publication_interval_median_seconds": 2.9686473608016968,
+      "combined_publication_interval_max_seconds": 3.832338809967041,
+      "preview_ready_to_publication_median_seconds": 0.9918010234832764,
+      "preview_ready_to_publication_max_seconds": 1.9551098346710205,
+      "last_publication_seconds_from_session_start": 326.5484809875488,
+      "translation_result_count": 0,
+      "analysis_result_count": 0,
+      "new_api_request_count": 0,
+      "additional_api_usd": 0,
+      "verification": {
+        "runtime_saved_source_hashes_match_current_files": true,
+        "canonical_pcm_verified_chunks": 22,
+        "preview_pcm_verified_windows": 87,
+        "causal_publication_times_and_independent_preview_ids": true,
+        "preview_publication_and_backward_seek_boundaries_checked": 87
+      }
+    }
+  ],
+  "timing_definitions": {
+    "publication": "Recorded backend publication, not measured browser rendering.",
+    "preparation": "Separate model preparation completed before session creation; no lecture audio is consumed.",
+    "combined_publication_interval": "Consecutive intervals after sorting canonical and preview publication times, excluding the wait before the first publication; not preview-only cadence or per-word latency."
+  },
+  "regression": {
+    "python_total": 526,
+    "python_passed": 524,
+    "python_opt_in_native_skipped": 2,
+    "python_seconds": 111.506,
+    "node_suites_passed": 2,
+    "subsequent_css_change": "Empty-state visibility corrected; Node checks repeated and passed. Python implementation unchanged.",
+    "current_validated_code_file_count": 63,
+    "current_validated_code_identity": "f01b3568075da357aaf4931ca26245df3b3f66dbf488500c0a6079f5bf90b69b",
+    "code_identity_scope": "Final presentation/test/setup tree; separate from the runtime source copies verified for the full recording.",
+    "code_identity_method": "SHA-256 of sorted records: relative_path + NUL + file_sha256 + LF."
+  },
+  "visual_check": "Played the pilot from 0 to 14 seconds; seeking to 4 seconds showed a visible recognition hint and 5 seconds showed original text. The full recording's player showed the recognition-only label and text at cursor 5, continued updating during normal playback from 5 to 36.16 seconds, and removed future text after reset to 0. No browser-render latency measured.",
+  "limits": {
+    "new_cloud_pipeline_validated": false,
+    "exact_audio_start_timestamp_recorded": false,
+    "browser_render_latency_measured": false,
+    "microphone_tested": false,
+    "speech_accuracy_verified": false,
+    "comprehension_improvement_measured": false,
+    "development_assistant_usage": "not measured",
+    "electricity": "not measured"
+  }
+}

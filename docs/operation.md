@@ -9,7 +9,7 @@ Use Python 3.12 or later. Run `./setup.command` for the environment and pinned l
 ./start.command --cloud --authorization config/authorization.json
 ```
 
-The check and server startup do not start recording. The default dashboard port is 8776. `./start.command` alone uses a local LLM through Ollama for translations and understanding support. Install and run Ollama and the selected model separately; the default is `qwen3:4b`. Evaluation of that model/settings found incorrect translations and relationships between ideas, so the cloud configuration is recommended. Local mode generates recent-window translations within analysis; it does not use the separate continuous cloud translation queue.
+The check and server startup do not start recording. Normal live startup loads and exercises the speech recognizer with synthetic silence before enabling Start; `--check` and saved-result viewing do not run that preparation. Preparation is shown separately from recording and can be stopped or retried after a failure. The default dashboard port is 8776. `./start.command` alone uses a local LLM through Ollama for translations and understanding support. Install and run Ollama and the selected model separately; the default is `qwen3:4b`. Evaluation of that model/settings found incorrect translations and relationships between ideas, so the cloud configuration is recommended. Local mode generates recent-window translations within analysis; it does not use the separate continuous cloud translation queue.
 
 Select the microphone and recognition language. Check that the input is the one you intend to use, the local model and native helper are ready, and adequate storage remains. macOS microphone permission is required. Keep the Mac awake and connected to power during a session.
 
@@ -48,7 +48,7 @@ Saved local recognition lets that running session resume translation using text 
 
 After pressing the recording start button, confirm incoming audio, increasing saved duration, and then new source utterances. A request-success notification alone is not evidence of continued capture or completed storage.
 
-The first recognition can take longer while the model initializes. The latest text at the end of 「原文」 uses the latest available audio, refreshing nominally every three seconds with up to 15 seconds of context. Canonical source recognition still waits for each default 15-second chunk. A quiet input with valid PCM is different from input that has stopped arriving.
+Wait for local recognition preparation to finish before starting. The same prepared model instance is reused for the session, so audio is not admitted while first-time model initialization runs. Preparation duration is recorded separately from the session clock; recorded-file experiments also prepare before supplying audio. The latest text at the end of 「原文」 uses the latest available audio, refreshing nominally every three seconds with up to 15 seconds of context. Canonical source recognition still waits for each default 15-second chunk. A quiet input with valid PCM is different from input that has stopped arriving.
 
 Translations are queued on a nominal 60-second schedule and understanding support on a nominal 120-second schedule. One cloud request runs at a time. These intervals are not end-to-end latency promises. Pending translation counts and failure states are more informative than waiting for a particular wall-clock second.
 

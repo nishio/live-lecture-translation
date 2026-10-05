@@ -12,6 +12,8 @@ The native helper is tied to its source through a build identity. Capture verifi
 
 `lecture_live.py` maintains a local MLX Whisper worker and reads a manifest identifying the locally available model. The reference workflow uses `large-v3-turbo`. Source utterances retain IDs, recognized text, timing, language, and uncertainty information.
 
+Normal application startup prepares this recognizer before a recording/replay session can start. Preparation loads the pinned model and runs one bounded three-second synthetic-silence decode under the shared local-inference lock. Its output is discarded; its duration, language and outcome are saved separately. The same process and recognizer are reused after preparation. The dashboard shows preparation and supports stop/retry; a stop received at the ready boundary still prevents source admission. Saved-result viewing and startup checks do not perform this inference.
+
 Recognition publishes independently of the cloud worker. A request already generating a translation or analysis must not hold back newly recognized text. Recognition chunks introduce their own waiting time before any inference begins.
 
 One completed audio chunk can produce several Whisper segments. Each segment becomes a source line, and the chunk's lines are published together when recognition completes. The saved-result player preserves this publication boundary rather than revealing each line at its utterance timestamp.
@@ -23,6 +25,8 @@ Canonical rows entirely before the preview window remain above it. Rows overlapp
 Preview IDs never enter the immutable transcript or cloud selection. The canonical source path remains append-only, with a default 15-second chunk. Overlapping previews are not appended as repeated speech or clipped using segment timestamps as word boundaries. Stable-prefix reconciliation and translation-time re-recognition are not integrated. Explicit stop prevents new provisional inference as well as canonical work; natural file completion still drains canonical work. See the [provisional recognition decisions](../wiki/provisional-asr.md#implemented-provisional-display).
 
 Raw recognized speech remains the evidence layer. A future correction system should preserve the original recognition, the proposed correction, and the evidence for accepting it. A plausible name is not an adequate substitute for missing evidence.
+
+Startup is a separate acceptance condition. Correctly replaying the historical 20.167-second first publication does not establish useful live speed. The current condition requires first nonempty original text within six seconds of actual audio supply, then continuing updates without recognition stalls; report first arrival, subsequent gaps and backlog separately. Model preparation remains visible and timed before audio starts instead of hiding it by changing saved timestamps. The [45/325.567-second local trials](experiments/asr-startup-readiness.md) passed at 4.236/4.206 seconds from session start, after 12.059/8.125 seconds of separate preparation; the full run's later combined publication gap was at most 3.832 seconds. Session-relative measurements include pre-audio overhead and are not exact speech-to-browser latency. This verifies the [local startup condition](../wiki/provisional-asr.md#startup-latency-is-an-acceptance-condition), not new cloud or microphone acceptance.
 
 ## Translation tracks unfinished work
 

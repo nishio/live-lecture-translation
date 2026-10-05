@@ -52,6 +52,90 @@ async function run() {
   assert.equal(capturePresentation(snapshot({capture: {state: 'stalled'}}), true, clock).label, '入力途絶・要確認');
   assert.equal(translationMap(snapshot({lines: [{id: 'a', translation_ja: '保存済み'}], analysis: {result: {translations: [{source_id: 'a', text: '旧訳'}, {source_id: 'b', text: '新訳'}]}}})).get('a'), '保存済み');
 
+  const startup = appFixture(); await startup.app.loadDevices();
+  const preparingState = snapshot({processing_active: true,
+    preflight: {state: 'ready', checks: [{id: 'asr', state: 'ready', label: '保存済みモデル', message: 'ファイル確認済み'}]},
+    asr_preparation: {state: 'preparing', started_at: 990, completed_at: null, error: null, stop_requested: false}});
+  startup.state(preparingState); startup.app.acceptState(preparingState);
+  assert.equal(startup.$('start-button').disabled, true, 'Saved-model preflight cannot substitute for actual recognizer preparation');
+  assert.match(startup.$('start-button').textContent, /音声認識を準備中/);
+  assert.match(startup.$('preflight-summary').textContent, /音声認識を準備中/);
+  assert.doesNotMatch(startup.$('preflight-summary').textContent, /録音可能|できています/);
+  assert.match(startup.$('setup-hint').textContent, /録音はまだ始まっていません/);
+  assert.match(startup.$('transcript').textContent, /音声認識を準備/);
+  assert.equal(startup.$('stop-button').disabled, false, 'Preparation can be stopped before any recording session exists');
+  assert.equal(startup.$('stop-button').textContent, '準備を停止');
+  await startup.app.recordAction('start');
+  assert.equal(startup.calls.filter(call => call.url === '/api/start').length, 0);
+  let resolvePreparationStop;
+  startup.post((url) => {assert.equal(url, '/api/stop'); return new Promise(resolve => {resolvePreparationStop = resolve;});});
+  const preparationStop = startup.app.recordAction('stop');
+  assert.equal(startup.$('stop-button').disabled, true);
+  await startup.app.recordAction('stop');
+  assert.equal(startup.calls.filter(call => call.url === '/api/stop').length, 1, 'Pending preparation stop cannot be submitted twice');
+  const preparationStopping = structuredClone(preparingState); preparationStopping.asr_preparation.stop_requested = true;
+  startup.state(preparationStopping); resolvePreparationStop(response({ok: true})); await preparationStop;
+  assert.match(startup.$('action-message').textContent, /開始済みの処理の終了を待っています/);
+  assert.equal(startup.$('start-button').disabled, true);
+  assert.equal(startup.$('preparation-retry-button').hidden, true, 'An admitted warmup must finish before preparation can be retried');
+  assert.equal(startup.$('stop-button').disabled, true);
+  const preparationPaused = structuredClone(preparationStopping);
+  preparationPaused.processing_active = false; preparationPaused.asr_preparation.state = 'paused';
+  startup.state(preparationPaused); startup.app.acceptState(preparationPaused);
+  assert.equal(startup.$('start-button').disabled, true);
+  assert.equal(startup.$('preparation-retry-button').hidden, false);
+  assert.match(startup.$('setup-hint').textContent, /準備を停止/);
+  let resolvePreparationRetry;
+  startup.post((url) => {assert.equal(url, '/api/prepare-asr'); return new Promise(resolve => {resolvePreparationRetry = resolve;});});
+  const preparationRetry = startup.$('preparation-retry-button').click();
+  await startup.app.recordAction('prepare');
+  assert.equal(startup.calls.filter(call => call.url === '/api/prepare-asr').length, 1);
+  assert.equal(startup.$('preparation-retry-button').disabled, true);
+  startup.state(preparingState); resolvePreparationRetry(response({ok: true})); await preparationRetry;
+  assert.match(startup.$('action-message').textContent, /録音はまだ始まっていません/);
+  const preparationFailed = structuredClone(preparingState);
+  preparationFailed.processing_active = false; preparationFailed.asr_preparation.state = 'failed';
+  preparationFailed.asr_preparation.error = '<b>synthetic preparation failure</b>';
+  startup.app.acceptState(preparationFailed);
+  assert.equal(startup.$('preparation-error').textContent, '<b>synthetic preparation failure</b>');
+  assert.equal(startup.$('start-button').disabled, true); assert.equal(startup.$('preparation-retry-button').hidden, false);
+  const preparationReady = structuredClone(preparingState);
+  preparationReady.processing_active = false; preparationReady.asr_preparation.state = 'ready';
+  preparationReady.asr_preparation.completed_at = 999;
+  startup.app.acceptState(preparationReady);
+  assert.equal(startup.$('start-button').disabled, false);
+  assert.match(startup.$('setup-hint').textContent, /準備ができました/);
+  assert.match(startup.$('transcript').textContent, /録音を開始すると/);
+  assert.equal(startup.calls.filter(call => call.url === '/api/start').length, 0, 'Finishing or retrying preparation never automatically records');
+
+  const emptyStartup = snapshot({session: {id: 'warm-start', source_kind: 'microphone'},
+    capture: {state: 'recording', audio_seconds: 0, last_audio_at: clock},
+    provisional_asr: {enabled: true, state: 'waiting', revision: null, window_start_seconds: 0,
+      through_seconds: 0, lines: [], refresh_seconds: 3, window_seconds: 15,
+      schedule: {state: 'waiting', reason: 'recording', clock: 'audio', interval_seconds: 3, remaining_seconds: 3}}});
+  startup.app.acceptState(emptyStartup);
+  assert.match(startup.$('transcript').textContent, /音声の到着を待っています/);
+  const receivingStartup = structuredClone(emptyStartup); receivingStartup.capture.audio_seconds = 2;
+  receivingStartup.provisional_asr.schedule.remaining_seconds = 1;
+  startup.app.acceptState(receivingStartup);
+  assert.match(startup.$('transcript').textContent, /音声を受信/);
+  const recognizingStartup = structuredClone(receivingStartup);
+  recognizingStartup.capture.audio_seconds = 3.2; recognizingStartup.provisional_asr.state = 'running';
+  recognizingStartup.provisional_asr.schedule = {state: 'busy', reason: 'request', clock: 'audio', interval_seconds: 3};
+  startup.app.acceptState(recognizingStartup);
+  assert.match(startup.$('transcript').textContent, /最初の原文を認識しています/);
+  assert.equal(startup.$('provisional-lines').children.length, 0, 'Readiness and busy indicators never invent early recognition');
+  startup.app.freeze();
+  const firstPublished = structuredClone(recognizingStartup);
+  firstPublished.capture.audio_seconds = 3.9;
+  firstPublished.provisional_asr = {...firstPublished.provisional_asr, state: 'completed', revision: 1, through_seconds: 3,
+    published_at: clock, lines: [{id: 'p1-l0', text: 'Actual synthetic publication.', start_seconds: 0, end_seconds: 3}]};
+  startup.app.acceptState(firstPublished);
+  assert.doesNotMatch(startup.$('transcript').textContent, /Actual synthetic publication/, 'Holding an empty initial view also holds back later text');
+  startup.app.goLive();
+  assert.equal(startup.$('provisional-lines').textContent, 'Actual synthetic publication.');
+  assert.doesNotMatch(startup.$('transcript').textContent, /最初の原文を認識しています/);
+
   const preview = appFixture();
   const previewLine = (revision, value, uncertain = false) => ({id: `p${revision}-l0`, text: value,
     start_seconds: 0, end_seconds: 6, language: 'en', uncertain});

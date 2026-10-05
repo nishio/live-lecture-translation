@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Prepare local speech recognition before microphone/replay audio starts, reuse the initialized model, and show preparation, cancellation and retry separately. Preserve preparation duration and actual text publication times. Check first nonempty text and sustained updates in fresh-process saved-audio trials instead of accepting a long initial blank as expected behavior.
+
 - Put the latest revisable recognition in the main original-text flow and use its three-second schedule for the primary indicator. Keep overlapping earlier recognition intact under 「前の認識を見る」, preserving canonical source IDs and translation input. Reuse saved publication times without new generation.
 - Show provisional recognition from a trailing 15-second audio window with a nominal three-second refresh. Keep revisable previews separate from immutable source lines and translation input, prioritize canonical recognition, preserve stop behavior, and replay previews at their actual recorded publication times.
 - Make the dashboard stop button end capture and new recognition, translation, analysis and retries immediately, retaining saved results and unfinished work. Check stop near model dispatch; already started operations may finish. Natural recorded-file completion still processes its remaining work.
