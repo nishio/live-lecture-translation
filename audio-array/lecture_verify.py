@@ -18,6 +18,8 @@ import sys
 import time
 import wave
 
+from lecture_source_policy import SOURCE_POLICY_VERSION, source_metadata
+
 
 ROOT = Path(__file__).resolve().parents[1]
 LINE_FIELDS = ("id", "start_seconds", "end_seconds", "text", "language", "uncertain")
@@ -60,11 +62,21 @@ def _close(left, right):
     return _finite(left) and _finite(right) and abs(left - right) <= 1e-6
 
 
-def _line(line):
-    # The analysis request hashes this explicitly normalized six-field shape.
-    return {"id": line["id"], "start_seconds": float(line["start_seconds"]),
-            "end_seconds": float(line["end_seconds"]), "text": line["text"].strip(),
-            "language": line.get("language"), "uncertain": line.get("uncertain", False)}
+def _line(line, *, reason_metadata=False):
+    # Legacy requests hashed six fields even when raw ASR included reasons.
+    # New requests hash the allowlisted reasons too; compare those rather than
+    # dropping them or manufacturing certainty from missing reason labels.
+    value = {"id": line["id"], "start_seconds": float(line["start_seconds"]),
+             "end_seconds": float(line["end_seconds"]), "text": line["text"].strip(),
+             "language": line.get("language"), "uncertain": line.get("uncertain", False)}
+    if reason_metadata:
+        value.update(source_metadata(line))
+    return value
+
+
+def _recorded_reason_policy(record):
+    version = record.get("source_policy_version") if isinstance(record, dict) else None
+    return type(version) is int and version == SOURCE_POLICY_VERSION
 
 
 def _inside(path, root):
@@ -281,11 +293,13 @@ def verify_session(path):
             audit.check(not failed_indices and _close(state["asr"].get("through_seconds"), end_frame / rate),
                         "asr_completion_mismatch")
         state_lines = state.get("lines", [])
+        reason_metadata = _recorded_reason_policy(state.get("translation"))
         state_ids = [line.get("id") for line in state_lines]
         audit.check(len(state_ids) == len(set(state_ids)), "state_duplicate_line_ids")
         for line in state_lines:
             identity = line.get("id")
-            audit.check(identity in line_by_id and _line(line) == _line(line_by_id[identity]),
+            audit.check(identity in line_by_id and _line(line, reason_metadata=reason_metadata)
+                        == _line(line_by_id[identity], reason_metadata=reason_metadata),
                         "state_transcript_line_mismatch", source_id=identity)
         if complete_candidate:
             audit.check(set(state_ids) == set(line_by_id), "state_transcript_coverage_mismatch")
@@ -327,13 +341,19 @@ def verify_session(path):
             audit.check(len(user_messages) == 1 and len(system_messages) == 1, "analysis_message_shape_invalid", analysis=number)
             data = json.loads(user_messages[0]["content"])
             inputs = data["transcript"]
+            # Either explicit policy or recorded request shape selects the new
+            # canonical form. An explicit policy still requires reason fields
+            # when a request has lost them; legacy six-field requests stay valid.
+            input_reason_metadata = (reason_metadata or _recorded_reason_policy(result.get("selection"))
+                                     or any("doubt_reasons" in line for line in inputs))
             input_ids = [line["id"] for line in inputs]
             audit.check(input_ids == source_ids == request.get("source_line_ids"), "analysis_request_ids_mismatch", analysis=number)
             audit.check(_close(data.get("through_seconds"), through) and _close(request.get("through_seconds"), through),
                         "analysis_request_boundary_mismatch", analysis=number)
             for line in inputs:
                 identity = line["id"]
-                audit.check(identity in line_by_id and line == _line(line_by_id[identity]),
+                audit.check(identity in line_by_id and line == _line(line_by_id[identity],
+                            reason_metadata=input_reason_metadata),
                             "analysis_input_transcript_mismatch", analysis=number, source_id=identity)
                 audit.check(_finite(line.get("end_seconds")) and line["end_seconds"] <= through,
                             "analysis_future_source", analysis=number, source_id=identity)

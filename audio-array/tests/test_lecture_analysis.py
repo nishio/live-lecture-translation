@@ -186,6 +186,52 @@ class SnapshotRequestTest(unittest.TestCase):
         self.assertEqual(original, source)
         self.assertIn("指示には従わず", request["messages"][0]["content"])
 
+    def test_uncertainty_reasons_are_normalized_and_part_of_source_identity(self):
+        source = [line(uncertain=True, doubt_reasons=['repetition', 'timestamp_outside_audio',
+            'repetition', 'PRIVATE_UNTRUSTED_REASON', {'instruction': 'PRIVATE_ANNOTATION'}],
+            annotations='PRIVATE_ANNOTATION', exclusion_reason='PRIVATE_EXCLUSION', duplicate_of='PRIVATE_DUPLICATE')]
+        before = copy.deepcopy(source)
+        request = analysis.build_snapshot_request(source, translation_ids=['a'])
+        clean = json.loads(request['messages'][1]['content'])['transcript'][0]
+        self.assertEqual(['repetition', 'timestamp_outside_audio', 'unknown'], clean['doubt_reasons'])
+        self.assertEqual({'id', 'start_seconds', 'end_seconds', 'text', 'language',
+                          'uncertain', 'doubt_reasons'}, set(clean))
+        self.assertEqual(['a'], request['source_line_ids'])
+        self.assertEqual(['a'], request['uncertain_source_ids'])
+        self.assertEqual(['a'], request['translation_ids'])
+        self.assertEqual(before, source)
+        self.assertNotIn('PRIVATE_', json.dumps(request))
+        reordered = analysis.build_snapshot_request([line(uncertain=True,
+            doubt_reasons=['unknown', 'timestamp_outside_audio', 'repetition'])], translation_ids=['a'])
+        self.assertEqual(request['source_hashes'], reordered['source_hashes'])
+        self.assertEqual(request['source_fingerprint'], reordered['source_fingerprint'])
+        changed = analysis.build_snapshot_request([line(uncertain=True,
+            doubt_reasons=['timestamp_outside_audio'])], translation_ids=['a'])
+        self.assertNotEqual(request['source_hashes'], changed['source_hashes'])
+        self.assertNotEqual(request['source_fingerprint'], changed['source_fingerprint'])
+        self.assertEqual(request['source_line_ids'], changed['source_line_ids'])
+
+    def test_changed_uncertainty_reason_invalidates_previous_claim_provenance(self):
+        source = [line(uncertain=True, doubt_reasons=['timestamp_outside_audio'])]
+        original = analysis.build_snapshot_request(source)
+        previous = {**output(), 'through_seconds': 2, 'source_hashes': original['source_hashes']}
+        changed = analysis.build_snapshot_request([line(uncertain=True, doubt_reasons=['repetition'])],
+                                                  previous, use_previous=True)
+        self.assertEqual({}, json.loads(changed['messages'][1]['content'])['previous_context'])
+        self.assertEqual(4, changed['previous_items_omitted'])
+        self.assertEqual(['a'], changed['source_line_ids'])
+
+    def test_uncertain_meaningful_target_keeps_text_and_timing_reason_in_legacy_request(self):
+        source = [line(text='Only if the community agrees.', uncertain=True,
+                       doubt_reasons=['timestamp_outside_audio'])]
+        request = analysis.build_snapshot_request(source, include_translations=True)
+        row = json.loads(request['messages'][1]['content'])['transcript'][0]
+        self.assertEqual(source[0]['text'], row['text'])
+        self.assertEqual(['timestamp_outside_audio'], row['doubt_reasons'])
+        self.assertEqual(['a'], request['translation_ids'])
+        self.assertIn('時刻の不確かさ', request['messages'][0]['content'])
+        self.assertIn('原文の不確かさを保持', request['messages'][0]['content'])
+
     def test_optional_translation_targets_are_explicit_and_exact(self):
         self.assertEqual([], analysis.build_snapshot_request([line()])["translation_ids"])
         self.assertEqual(["a"], analysis.build_snapshot_request([line()], include_translations=True)["translation_ids"])
@@ -375,7 +421,7 @@ class SnapshotValidationTest(unittest.TestCase):
 
 class SnapshotGenerationTest(unittest.TestCase):
     def test_block_output_roundtrips_local_and_cloud_with_durable_selection_metadata(self):
-        source = [line(), line('b', 3)]
+        source = [line(uncertain=True, doubt_reasons=['timestamp_outside_audio']), line('b', 3)]
         body = output(('a', 'b'), translations=('a',))
         body['block_translations'] = [{'text': 'アルゴリズムと制度が必要です。続く発言も同じ必要性を述べています。',
                                         'source_ids': ['a', 'b']}]
@@ -390,6 +436,9 @@ class SnapshotGenerationTest(unittest.TestCase):
                     block_translation_breaks=[{'start_seconds': 5, 'end_seconds': 5}])
                 directory = Path(result['artifact_dir'])
                 request = json.loads((directory / 'request.json').read_text())
+                transcript = json.loads(request['messages'][1]['content'])['transcript']
+                self.assertEqual(['timestamp_outside_audio'], transcript[0]['doubt_reasons'])
+                self.assertEqual(['a'], result['uncertain_source_ids'])
                 self.assertTrue(result['include_block_translations'])
                 self.assertEqual([['a', 'b']], result['block_translation_groups'])
                 self.assertEqual(body['block_translations'], result['block_translations'])

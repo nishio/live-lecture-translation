@@ -17,6 +17,7 @@ import time
 import uuid
 
 import event_insights as insights
+from lecture_source_policy import source_metadata
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,13 +68,22 @@ basis=backgroundはモデルの一般知識による未検証の補足です。b
 今回の入力に説明がないことを、講演全体で説明がないことに広げません。
 一般知識は未検証の背景補足と分かる表現にし、根拠のない知識を確定事実として断定しません。
 背景補足をheadline/summary/flowの証拠に混ぜません。概念が曖昧なら無理に説明しません。
+有用な説明を裏付けられない概念は省き、概念一覧は空でも構いません。
 
-ASRは正解の逐語録ではありません。uncertain=true、未完文、主語不明、聞き取れない語は
+ASRは正解の逐語録ではありません。uncertain=trueの原文も読み、doubt_reasonsに応じて
+不確かさを保持します。timestamp_outside_audioは時刻の不確かさであり、それだけで
+本文全体が誤認識・無意味だとは判断しません。no_speech、repetition、common_hallucination、
+unexpected_language、no_speaker_turn等は文字起こしの信頼性の注意情報であり、
+根拠の弱い本文を確定事実としてheadline/summary/flow/conceptsへ変換しません。
+doubt_reasonsがunknownのuncertain=trueも確実な発言には格上げしません。
+未完文、主語不明、聞き取れない語は
 不確かさを明記し、続きを補完しません。数字・年・主体・否定・条件・話者の見解、予定・
 実証・実現済みの違いを保持し、固有名の漢字表記や外部事実を創作しません。
 証拠が弱ければ「現時点では論点を確定できない」と短く述べ、各一覧は空で構いません。
 読み負担を抑え、headlineは短い一文、各項目は1〜2文にしてください。
 translation_idsの各IDだけ日本語訳を1件ずつ返し、不要なIDの訳を加えません。
+uncertain=trueでも指定された意味のある本文は訳し、原文の不確かさを保持します。
+読めない箇所を自然そうな語で埋めず、判読できる部分だけを対応させます。
 訳は要約せず原文の限定を保ち、日本語の原文ならそのままで構いません。
 英語の文や節をそのまま訳欄に返すのは禁止です。短い固有名・略語だけの発言は原綴りを
 維持してよいですが、通常の文は日本語に訳してください。他の行の内容をこのIDの訳として
@@ -168,7 +178,7 @@ def _clean_lines(lines, through_seconds):
         # No caller context/reference fields are ever copied into model input.
         clean.append({"id": identity, "start_seconds": start, "end_seconds": end,
                       "text": _string(item.get("text"), "line.text", 10000),
-                      "language": language, "uncertain": uncertain})
+                      "language": language, **source_metadata(item)})
     through = max(item["end_seconds"] for item in clean) if through_seconds is None else _number(
         through_seconds, "through_seconds")
     if any(item["end_seconds"] > through for item in clean):

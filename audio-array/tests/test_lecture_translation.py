@@ -52,16 +52,16 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual[0], "s0")  # Old speech outside any recent window remains pending.
 
-    def test_uncertain_japanese_empty_and_covered_rows_split_groups(self):
-        for change, covered in [({"uncertain": True}, set()), ({"language": "ja"}, set()),
+    def test_filler_japanese_empty_and_covered_rows_split_groups(self):
+        for change, covered in [({"text": "um", "uncertain": True}, set()), ({"language": "ja"}, set()),
                                 ({"text": ""}, set()), ({}, {"s1"})]:
             with self.subTest(change=change, covered=covered):
                 rows = [line(0), line(1, **change), line(2)]
                 plan = translation.plan_translation(rows, covered, flush=True)
                 self.assertEqual(plan["groups"], [["s0"], ["s2"]])
 
-    def test_overlap_uncertain_line_is_a_boundary_even_without_silence(self):
-        rows = [line(0, end_seconds=4), line(1, start_seconds=2, end_seconds=3, uncertain=True),
+    def test_overlap_filler_line_is_a_boundary_even_without_silence(self):
+        rows = [line(0, end_seconds=4), line(1, "uh", start_seconds=2, end_seconds=3, uncertain=True),
                 line(2, start_seconds=3, end_seconds=5)]
         self.assertEqual(translation.plan_translation(rows, set(), flush=True)["groups"], [["s0"], ["s2"]])
 
@@ -74,7 +74,7 @@ class PlannerTests(unittest.TestCase):
     def test_partial_group_waits_without_flush_but_barrier_closes_it(self):
         self.assertIsNone(translation.plan_translation([line(0)], set()))
         self.assertEqual(translation.plan_translation([line(0)], set(), flush=True)["groups"], [["s0"]])
-        rows = [line(0), line(1, uncertain=True), line(2)]
+        rows = [line(0), line(1, "erm", uncertain=True), line(2)]
         self.assertEqual(translation.plan_translation(rows, set())["groups"], [["s0"]])
         self.assertEqual(translation.plan_translation([line(i) for i in range(8)], set())["target_source_ids"],
                          [f"s{i}" for i in range(8)])
@@ -129,7 +129,7 @@ class PlannerTests(unittest.TestCase):
     def test_empty_and_already_covered_have_no_plan(self):
         self.assertIsNone(translation.plan_translation([], set(), flush=True))
         self.assertIsNone(translation.plan_translation([line(0)], {"s0"}, flush=True))
-        self.assertIsNone(translation.plan_translation([line(0, uncertain=True), line(1, language="ja")], set(), flush=True))
+        self.assertIsNone(translation.plan_translation([line(0, "um", uncertain=True), line(1, language="ja")], set(), flush=True))
 
     def test_bad_input_types_order_ids_times_and_limits_fail_explicitly(self):
         bad_inputs = [[line(0), line(0)], [line(1), line(0)], [line(0, start_seconds=True)],
@@ -152,7 +152,7 @@ class PlannerTests(unittest.TestCase):
             translation.plan_translation([line(0)], set(), flush=True)
 
     def test_plan_changes_and_resigned_invalid_groups_are_rejected(self):
-        original = translation.plan_translation([line(0), line(1), line(2, uncertain=True), line(3)], set(), flush=True)
+        original = translation.plan_translation([line(0), line(1), line(2, "uh", uncertain=True), line(3)], set(), flush=True)
         mutated = copy.deepcopy(original)
         mutated["source_lines"][0]["text"] += " changed"
         with self.assertRaises(translation.TranslationInputError):
@@ -171,6 +171,126 @@ class PlannerTests(unittest.TestCase):
             plan = translation.plan_translation([line(0)], set(), flush=True)
             request = translation.build_translation_request(plan)
             cloud.build_payload(request["messages"], request["schema"], "gpt-6-luna")
+
+
+class SourcePolicyTests(unittest.TestCase):
+    def plans(self, rows, covered=()):
+        yield translation.plan_translation(rows, covered, flush=True)
+        yield translation.plan_sentence_translation(rows, covered,
+            through_seconds=max(row['end_seconds'] for row in rows), end_of_input=True)['plan']
+
+    def test_meaningful_uncertain_text_remains_a_translation_target(self):
+        examples = [('No, the condition does not hold.', ['no_speech']),
+                    ('We should preserve this complete sentence.', ['timestamp_outside_audio']),
+                    ('so', ['repetition']), ('42', ['unknown']),
+                    ('This clause still matters. ' * 55, ['repetition'])]
+        for text, reasons in examples:
+            rows = [line(0, text, uncertain=True, doubt_reasons=reasons)]
+            original = copy.deepcopy(rows)
+            for plan in self.plans(rows):
+                with self.subTest(text=text[:40], mode=plan['selection'].get('policy')):
+                    self.assertEqual(['s0'], plan['target_source_ids'])
+                    self.assertEqual(text.strip(), plan['source_lines'][0]['text'])
+                    self.assertTrue(plan['source_lines'][0]['uncertain'])
+                    self.assertEqual(reasons, plan['source_lines'][0]['doubt_reasons'])
+                    self.assertEqual(2, plan['plan_version'])
+                    self.assertEqual(1, plan['selection']['source_policy_version'])
+                    self.assertEqual([], plan['selection']['excluded_sources'])
+                    translation.build_translation_request(plan)
+            self.assertEqual(original, rows)
+
+    def test_excluded_filler_and_empty_text_cannot_reenter_as_context(self):
+        rows = [line(0, 'No, that is not the requirement.', uncertain=True, doubt_reasons=['no_speech']),
+                line(1, 'um, uh... erm', uncertain=True), line(2), line(3, ' ')]
+        for plan in self.plans(rows, {'s0'}):
+            self.assertEqual(['s2'], plan['target_source_ids'])
+            self.assertEqual(['s0', 's2'], [row['id'] for row in plan['source_lines']])
+            request = translation.build_translation_request(plan)
+            data = json.loads(request['messages'][1]['content'])
+            self.assertEqual(['s0'], data['context_source_ids'])
+            self.assertEqual(['no_speech'], data['transcript'][0]['doubt_reasons'])
+            self.assertEqual([], data['transcript'][1]['doubt_reasons'])
+            self.assertEqual([{'source_id': 's1', 'reason': 'filler_only', 'duplicate_of': None},
+                              {'source_id': 's3', 'reason': 'empty', 'duplicate_of': None}],
+                             plan['selection']['excluded_sources'])
+            self.assertNotIn('exclusion_reason', json.dumps(data))
+            self.assertNotIn('duplicate_of', json.dumps(data))
+
+    def test_zero_duration_same_chunk_duplicate_is_audited_without_losing_first_source(self):
+        text = 'No, the condition does not hold.'
+        first = line(0, text, id='c000004-l0001', start_seconds=3, end_seconds=3,
+                     uncertain=True, doubt_reasons=['timestamp_outside_audio'])
+        duplicate = {**first, 'id': 'c000004-l0002',
+                     'doubt_reasons': ['repetition', 'timestamp_outside_audio']}
+        rows = [first, duplicate, line(2)]
+        original = copy.deepcopy(rows)
+        for plan in self.plans(rows):
+            self.assertEqual(['c000004-l0001', 's2'], plan['target_source_ids'])
+            self.assertEqual([['c000004-l0001'], ['s2']], plan['groups'])
+            self.assertEqual(['c000004-l0001', 's2'], [row['id'] for row in plan['source_lines']])
+            self.assertEqual([{'source_id': 'c000004-l0002', 'reason': 'duplicate_invalid_timing',
+                              'duplicate_of': 'c000004-l0001'}], plan['selection']['excluded_sources'])
+            translation.build_translation_request(plan)
+        self.assertEqual(original, rows)
+
+    def test_repetition_at_a_different_time_or_without_chunk_provenance_is_retained(self):
+        for identities, times in [(('s0', 's1'), ((3, 3), (3, 3))),
+                                  (('c000004-l0001', 'c000004-l0002'), ((0, 1), (3, 4))),
+                                  (('c000004-l0001', 'c000005-l0001'), ((3, 3), (3, 3)))]:
+            rows = [line(index, 'No.', id=identity, start_seconds=times[index][0],
+                         end_seconds=times[index][1], uncertain=True,
+                         doubt_reasons=['repetition', 'timestamp_outside_audio'])
+                    for index, identity in enumerate(identities)]
+            for plan in self.plans(rows):
+                self.assertEqual(list(identities), plan['target_source_ids'])
+                self.assertEqual([], plan['selection']['excluded_sources'])
+
+    def test_explicit_chunk_duplicate_audit_is_frozen_and_saved_with_result(self):
+        rows = [line(0, 'No.', start_seconds=3, end_seconds=3, segment=2, chunk=4,
+                     uncertain=True, doubt_reasons=['timestamp_outside_audio']),
+                line(1, 'No.', start_seconds=3, end_seconds=3, segment=2, chunk=4,
+                     uncertain=True, doubt_reasons=['repetition', 'timestamp_outside_audio'])]
+        expected = [{'source_id': 's1', 'reason': 'duplicate_invalid_timing', 'duplicate_of': 's0'}]
+        for plan in self.plans(rows):
+            self.assertEqual(['s0'], plan['target_source_ids'])
+            self.assertEqual(expected, plan['selection']['excluded_sources'])
+            self.assertNotIn('segment', plan['source_lines'][0])
+            altered = copy.deepcopy(plan)
+            altered['selection']['excluded_sources'] = []
+            with self.assertRaises(translation.TranslationInputError):
+                translation.build_translation_request(altered)
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(translation, 'PRIVATE_ROOTS', (Path(directory),)), \
+                mock.patch.object(cloud, 'generate', return_value={'result': response(plan)}):
+            result = translation.translate_batch(plan, provider='openai', model='gpt-6-luna', out_dir=directory)
+            saved = json.loads((Path(result['artifact_dir']) / 'result.json').read_text())
+            self.assertEqual(expected, saved['selection']['excluded_sources'])
+            self.assertEqual(['s0'], saved['target_source_ids'])
+            self.assertEqual(plan['source_hashes'], saved['source_hashes'])
+
+    def test_canonical_reason_metadata_matches_analysis_and_changes_fingerprints(self):
+        import lecture_analysis as analysis
+        source = line(0, uncertain=True, doubt_reasons=['repetition', 'timestamp_outside_audio',
+            'repetition', 'PRIVATE_REASON'], annotations='PRIVATE_ANNOTATION',
+            exclusion_reason='PRIVATE_EXCLUSION', duplicate_of='PRIVATE_DUPLICATE')
+        first = translation.plan_translation([source], (), flush=True)
+        reordered = translation.plan_translation([line(0, uncertain=True,
+            doubt_reasons=['unknown', 'timestamp_outside_audio', 'repetition'])], (), flush=True)
+        self.assertEqual(first['source_hashes'], reordered['source_hashes'])
+        self.assertEqual(first['source_fingerprint'], reordered['source_fingerprint'])
+        self.assertEqual(first['plan_fingerprint'], reordered['plan_fingerprint'])
+        changed = translation.plan_translation([line(0, uncertain=True,
+            doubt_reasons=['timestamp_outside_audio'])], (), flush=True)
+        self.assertNotEqual(first['source_hashes'], changed['source_hashes'])
+        self.assertNotEqual(first['plan_fingerprint'], changed['plan_fingerprint'])
+        snapshot = analysis.build_snapshot_request([source], translation_ids=['s0'])
+        self.assertEqual(first['source_hashes'], snapshot['source_hashes'])
+        self.assertEqual(first['source_fingerprint'], snapshot['source_fingerprint'])
+        self.assertEqual(['repetition', 'timestamp_outside_audio', 'unknown'],
+                         first['source_lines'][0]['doubt_reasons'])
+        self.assertNotIn('PRIVATE_', json.dumps(first))
+        self.assertEqual({'id', 'start_seconds', 'end_seconds', 'text', 'language',
+                          'uncertain', 'doubt_reasons'}, set(first['source_lines'][0]))
 
 
 class SentencePlannerTests(unittest.TestCase):
@@ -266,7 +386,7 @@ class SentencePlannerTests(unittest.TestCase):
         self.assertIsNone(result["next_through_seconds"])
 
     def test_excluded_covered_and_overlapping_rows_are_source_barriers(self):
-        for change, covered in [({"uncertain": True}, set()), ({"language": "ja"}, set()),
+        for change, covered in [({"text": "um", "uncertain": True}, set()), ({"language": "ja"}, set()),
                                 ({"text": ""}, set()), ({}, {"s1"})]:
             with self.subTest(change=change, covered=covered):
                 rows = [line(0, "An unfinished clause", end_seconds=4),
@@ -363,7 +483,7 @@ class SentencePlannerTests(unittest.TestCase):
 
 class ResponseTests(unittest.TestCase):
     def setUp(self):
-        self.plan = translation.plan_translation([line(0), line(1), line(2, uncertain=True), line(3)], set(), flush=True)
+        self.plan = translation.plan_translation([line(0), line(1), line(2, "um", uncertain=True), line(3)], set(), flush=True)
 
     def test_exact_ordered_groups_validate_from_object_and_json(self):
         value = response(self.plan)

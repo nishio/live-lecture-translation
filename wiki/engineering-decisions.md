@@ -131,3 +131,13 @@ Validate copyable commands without starting inference or paid APIs. Test the sel
 - Which end-to-end delays matter most while a person is simultaneously listening and reading?
 
 Answer these with publishable fixtures or newly documented trials. Do not promote a historical short-run result into a general performance guarantee.
+
+## Release acceptance follows the distributed source
+
+Freeze a dependency-complete candidate, including new modules and its license, before calling it a release. Record source identity, test totals and skipped layers, then exercise setup in a separate fresh environment without borrowing the running application's virtual environment or ledgers. A same-Mac installation is not independent hardware validation. Keep the v0.9.0 baseline and active sessions intact.
+
+Synthetic checks and a targeted translation comparison support their measured layers; neither completes microphone-to-display acceptance. Verify capture saving, ASR, translation coverage and final analysis independently after stop. Match evidence readers to versioned request metadata: the 1.0 candidate required a verifier fix because new uncertainty reasons were incorrectly compared against the legacy six-field request shape. Retain old-format compatibility and reject changed or missing reason evidence. Track pending real capture and cloud checks explicitly in the [1.0 release notes](../docs/release-1.0.md).
+
+## Project license and source-material attribution
+
+The project uses [GNU AGPL version 3 only](../LICENSE) (`AGPL-3.0-only`), except where otherwise noted, following the user's 2026-10-05 license selection. Keep both README license sections consistent. The [Audrey sample](../samples/audrey-plurality-seoul-2023/README.md) retains the source material's CC BY attribution, uncertainty and transformation notices; the application license does not replace those terms. This change is recorded after the extracted v0.9.0 baseline without moving that tag.

@@ -30,6 +30,8 @@ import uuid
 import wave
 import webbrowser
 
+from lecture_source_policy import SOURCE_POLICY_VERSION, plan_source_policy, source_metadata
+
 REPO = Path(__file__).resolve().parents[1]
 ASSETS = Path(__file__).with_name('lecture-dashboard')
 MODEL_METADATA = REPO / 'data/event-audio/model-cache/whisper-turbo.json'
@@ -82,6 +84,7 @@ def save_runtime(destination, configuration):
                Path(__file__).with_name('lecture_capture_native.swift'),
                Path(__file__).with_name('lecture_analysis.py'),
                Path(__file__).with_name('lecture_translation.py'),
+               Path(__file__).with_name('lecture_source_policy.py'),
                Path(__file__).with_name('lecture_cloud_scope.py'),
                Path(__file__).with_name('lecture_readiness.py'),
                Path(__file__).with_name('event_insights.py'),
@@ -110,6 +113,8 @@ def blank_state():
             'analysis': {'state': 'idle', 'through_seconds': 0, 'generated_at': None,
                          'provider': 'local', 'model': None, 'error': None, 'result': None},
             'translation': {'enabled': False, 'state': 'idle', 'blocks': [], 'pending_lines': 0,
+                'source_policy_version': SOURCE_POLICY_VERSION, 'excluded_sources': [],
+                'included_uncertain_lines': 0,
                 'ready_lines': 0, 'waiting_lines': 0,
                 'excluded_uncertain_lines': 0, 'native_lines': 0, 'through_seconds': 0,
                 'error': None, 'generated_at': None, 'worker_alive': False,
@@ -117,9 +122,31 @@ def blank_state():
             'lines': [], 'analysis_history': [], 'message': 'マイクを選び、録音を開始してください。'}
 
 
+def content_lines(lines):
+    """Select original rows while keeping derived noise decisions separate."""
+    return [row for row, decision in zip(lines, plan_source_policy(lines)) if not decision['exclusion_reason']]
+
+
+def legacy_source_policy(state):
+    # New sessions always have a version. Opening an old saved state must not
+    # reinterpret its completed coverage as newly pending work.
+    translation = state.get('translation', {})
+    if 'source_policy_version' in translation:
+        version = translation['source_policy_version']
+        if type(version) is not int or version != SOURCE_POLICY_VERSION:
+            raise ValueError('保存された翻訳原文ポリシーの版に対応していません。')
+        return False
+    return bool(state.get('session'))
+
+
+def exclusion_audit(planned):
+    return [{'source_id': row['id'], 'reason': row['exclusion_reason'], 'duplicate_of': row['duplicate_of']}
+            for row in planned if row['exclusion_reason']]
+
+
 def select_analysis_lines(lines, previous, *, window_seconds=180, max_lines=100):
     """Prefer new context, retaining prior evidence when it fits; never future input."""
-    usable = [line for line in lines if not line.get('uncertain') and line.get('text', '').strip()]
+    usable = content_lines(lines)
     if not usable:
         return []
     end = max(line['end_seconds'] for line in usable)
@@ -141,8 +168,9 @@ def bounded_analysis_input(lines, previous, *, include_block_translations=False,
     """Select an explicit, auditable recent excerpt within the complete request cap."""
     from lecture_analysis import build_snapshot_request
     from event_insights import InputTooLargeError
+    planned = plan_source_policy(lines)
     breaks = [{'start_seconds': line['start_seconds'], 'end_seconds': line['end_seconds']}
-              for line in lines if line.get('uncertain')] if include_block_translations else None
+              for line in planned if line['exclusion_reason']] if include_block_translations else None
     selected = select_analysis_lines(lines, previous)
     considered = len(selected)
     while selected:
@@ -153,6 +181,7 @@ def bounded_analysis_input(lines, previous, *, include_block_translations=False,
                 include_block_translations=include_block_translations, block_translation_breaks=breaks)
             if request['input_bytes'] <= 22000:
                 return selected, targets, {'considered_lines': considered, 'selected_lines': len(selected),
+                    'source_policy_version': SOURCE_POLICY_VERSION, 'excluded_sources': exclusion_audit(planned),
                     'omitted_for_request_limit': considered - len(selected),
                     'input_bytes': request['input_bytes'], 'policy': 'recent_180_seconds_plus_prior_evidence',
                     'include_block_translations': include_block_translations,
@@ -278,8 +307,10 @@ class LectureApp:
                  and self.worker and self.worker.is_alive()))
             result['analysis']['completion_confirmed'] = (not result['analysis']['worker_alive'] and
                 result['analysis']['state'] != 'running' and not self.inference_unconfirmed)
-            result['analysis']['untranslated_lines'] = sum(1 for row in result['lines']
-                if not row.get('uncertain') and row.get('language') != 'ja' and not row.get('translation_ja'))
+            analysis_lines = ([row for row in result['lines'] if not row.get('uncertain')]
+                              if legacy_source_policy(result) else content_lines(result['lines']))
+            result['analysis']['untranslated_lines'] = sum(1 for row in analysis_lines
+                if row.get('language') != 'ja' and not row.get('translation_ja'))
             for kind in ('analysis', 'translation'):
                 result[kind]['schedule'] = schedules[kind]
             result['capabilities'] = {'cloud_enabled': self.allow_cloud,
@@ -455,7 +486,7 @@ class LectureApp:
             return status('busy', 'request')
         if self.closing or self.abort_processing.is_set() or self.inference_unconfirmed:
             return status('blocked', 'closed')
-        eligible = [line for line in self.state['lines'] if not line.get('uncertain') and line.get('text', '').strip()]
+        eligible = content_lines(self.state['lines'])
         newest = eligible[-1]['id'] if eligible else None
         finished = self._translation_input_finished()
         if self._continuous_enabled():
@@ -483,14 +514,28 @@ class LectureApp:
         return status('waiting' if delay > 0 else 'due', reason)
 
     def _refresh_translation_locked(self):
+        legacy = legacy_source_policy(self.state)
         translation = self.state.setdefault('translation', deepcopy(blank_state()['translation']))
         covered = {identity for block in translation['blocks'] for identity in block['source_ids']}
-        lines = self.state['lines']
-        pending = [line for line in lines if str(line.get('text', '')).strip() and not line.get('uncertain')
+        if legacy:
+            translation.pop('source_policy_version', None)
+            lines = self.state['lines']
+            pending = [line for line in lines if str(line.get('text', '')).strip() and not line.get('uncertain')
+                       and line.get('language') != 'ja' and line['id'] not in covered]
+            translation.update(pending_lines=len(pending),
+                excluded_uncertain_lines=sum(bool(line.get('uncertain')) for line in lines),
+                native_lines=sum(bool(str(line.get('text', '')).strip()) and not line.get('uncertain')
+                                 and line.get('language') == 'ja' for line in lines), worker_alive=False)
+            return pending, covered
+        lines = plan_source_policy(self.state['lines'])
+        pending = [line for line in lines if not line['exclusion_reason']
                    and line.get('language') != 'ja' and line['id'] not in covered]
         translation.update(pending_lines=len(pending),
-            excluded_uncertain_lines=sum(bool(line.get('uncertain')) for line in lines),
-            native_lines=sum(bool(str(line.get('text', '')).strip()) and not line.get('uncertain')
+            source_policy_version=SOURCE_POLICY_VERSION, excluded_sources=exclusion_audit(lines),
+            included_uncertain_lines=sum(line['uncertain'] and not line['exclusion_reason']
+                                         and line.get('language') != 'ja' for line in lines),
+            excluded_uncertain_lines=sum(line['uncertain'] and bool(line['exclusion_reason']) for line in lines),
+            native_lines=sum(not line['exclusion_reason']
                              and line.get('language') == 'ja' for line in lines),
             worker_alive=bool(self.cloud_worker and self.cloud_worker.is_alive() and self.cloud_kind == 'translation'))
         if not pending:
@@ -609,6 +654,7 @@ class LectureApp:
                     'chunk_seconds': self.chunk_seconds, 'analysis_interval': self.analysis_interval,
                     'continuous_translation': self.continuous_translation,
                     'translation_interval': self.translation_interval,
+                    'translation_source_policy_version': SOURCE_POLICY_VERSION,
                     'translation_max_wait_seconds': TRANSLATION_MAX_WAIT_SECONDS,
                     'translation_lookahead_seconds': TRANSLATION_LOOKAHEAD_SECONDS,
                     'replay': bool(replay), 'pace': pace if replay else None})
@@ -994,6 +1040,8 @@ class LectureApp:
                         != source[identity].get(key, False if key == 'uncertain' else None)
                         for key in ('text', 'start_seconds', 'end_seconds', 'language', 'uncertain')):
                     raise TranslationResponseError('翻訳中に対象原文が変化しました。')
+                if source_metadata(by_id[identity]) != source_metadata(source[identity]):
+                    raise TranslationResponseError('翻訳中に対象原文の不確実性が変化しました。')
             additions = []
             boundaries = plan['selection'].get('group_boundaries', [])
             for index, block in enumerate(blocks):
@@ -1001,6 +1049,8 @@ class LectureApp:
                 stable = json.dumps([job['session']['id'], block['source_ids']], ensure_ascii=False).encode()
                 additions.append({'id': 'tr-' + hashlib.sha256(stable).hexdigest()[:24],
                     'text': block['text'], 'source_ids': list(block['source_ids']),
+                    'uncertain_source_ids': [row['id'] for row in rows if row['uncertain']],
+                    'uncertainty_reasons': {row['id']: row['doubt_reasons'] for row in rows if row['uncertain']},
                     'start_seconds': min(row['start_seconds'] for row in rows),
                     'end_seconds': max(row['end_seconds'] for row in rows),
                     'generated_at': result.get('generated_at', published), 'published_at': published})
@@ -1301,7 +1351,7 @@ class LectureApp:
                     self.persist(force=True)
                 finished = self.source_done.is_set() and self.audio_queue.empty()
                 with self.lock:
-                    eligible = [line for line in self.state['lines'] if not line.get('uncertain') and line.get('text', '').strip()]
+                    eligible = content_lines(self.state['lines'])
                     newest = eligible[-1]['id'] if eligible else None
                     provider = self.state['analysis']['provider']
                     enabled = provider != 'off'
@@ -1589,6 +1639,10 @@ def main():
         saved = json.loads(args.view_session.read_text())
         if saved.get('schema_version') != 1 or not isinstance(saved.get('lines'), list):
             parser.error('保存状態の形式が不正です。')
+        try:
+            legacy_source_policy(saved)
+        except ValueError as exc:
+            parser.error(str(exc))
         app.state = saved
         # CLI-selected directory only; never follow a path embedded in saved JSON.
         app.history_result_dir = args.view_session.resolve().parent

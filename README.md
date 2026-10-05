@@ -16,11 +16,13 @@ The aim is to help you follow the lecture with less effort: quickly grasp what i
 - Lets the reader hold the view, revisit earlier points, and browse a history of concept explanations.
 - Shows recording, recognition, translation, and analysis progress separately. A slow or failed cloud request does not intentionally stop recording.
 
+Transcription data is saved locally. If a coding agent such as Codex can access those files, you can ask questions about the lecture in the agent's chat, such as “Summarize the discussion so far” or “How did the speaker explain this concept?” Specify the transcript file or its saved location when asking.
+
 Results take time to appear because speech recognition, network requests, and generation all add delay. Translation normally runs at roughly 60-second intervals, and key points and concept explanations at 120-second intervals; updates may take longer. See the [operation guide](docs/operation.md) for controls and processing details.
 
 The dashboard is in Japanese and is designed to support English lecture listening with Japanese text. Automatic language detection and Japanese recognition are also available; Japanese source lines are not translated into Japanese.
 
-The development version includes unreleased features. See the [changelog](CHANGELOG.md) for changes by release.
+Version **1.0.0-rc.1** is a release candidate for Apple Silicon Macs. See the [release notes and validation status](docs/release-1.0.md) before using it at a lecture, and the [changelog](CHANGELOG.md) for changes since v0.9.0.
 
 ## Requirements and setup
 
@@ -92,7 +94,7 @@ You can set a spending limit in [cloud configuration](docs/cloud-configuration.m
 This application is experimental.
 
 - Recognition and translation can be wrong, especially for names and incomplete sentences. Generated key points and explanations can also contain errors.
-- Uncertain recognition remains visible but is excluded from translation. A completed translation queue does not mean every spoken word was translated.
+- Source text may be translated even when recognition is uncertain; a translation does not establish that the speech was heard correctly. Some fillers and repeated text are omitted from translation, while the original text and exclusion reasons remain saved.
 - Published short trials do not establish long microphone-session reliability, battery life, performance in adverse acoustics, or network recovery. Improvements in comprehension while listening have not been measured.
 - Automatic recovery of unfinished work after the application exits is not implemented.
 
@@ -127,6 +129,6 @@ Routine tests use synthetic data and do not start real microphone capture, model
 
 ## License
 
-A license has not yet been selected for this release. Publication of the repository alone does not grant an open-source license.
+Except where otherwise noted, this project is licensed under the **GNU Affero General Public License, version 3 only (AGPL-3.0-only)**. See [LICENSE](LICENSE) for the full terms.
 
 The [Audrey sample's source attribution and CC BY notice](samples/audrey-plurality-seoul-2023/README.md#出典と帰属) apply to that source material, not to the repository's application code.

@@ -50,7 +50,7 @@ Without a key file, use:
 
 ## API billing and Codex subscription access
 
-Version 0.9 calls the OpenAI API through its existing API-key adapter. A ChatGPT subscription does not change that adapter's billing. Codex separately supports ChatGPT sign-in for subscription access and API-key sign-in for usage-based access; see the official [authentication guide](https://learn.chatgpt.com/docs/auth).
+The application calls the OpenAI API through its existing API-key adapter. A ChatGPT subscription does not change that adapter's billing. Codex separately supports ChatGPT sign-in for subscription access and API-key sign-in for usage-based access; see the official [authentication guide](https://learn.chatgpt.com/docs/auth).
 
 Supported programmatic interfaces include: [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode) reuses saved CLI authentication, the [SDK](https://learn.chatgpt.com/docs/codex-sdk) controls local agents, and [app-server](https://learn.chatgpt.com/docs/app-server) supports custom clients. These documents were checked on 2026-10-05. For personal local use, authenticate through the supported Codex client; do not substitute a ChatGPT credential into this application's API-key field.
 

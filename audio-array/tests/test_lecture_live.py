@@ -63,6 +63,7 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(3, len((app.result_dir / 'transcript.jsonl').read_text().splitlines()))
         self.assertEqual(0, json.loads((app.result_dir / 'cost-report.json').read_text())['additional_api_usd'])
         manifest = json.loads((app.result_dir / 'runtime-manifest.json').read_text())
+        self.assertEqual(1, manifest['configuration']['translation_source_policy_version'])
         import hashlib
         for relative, digest in manifest['source_sha256'].items():
             self.assertEqual(digest, hashlib.sha256((app.result_dir / 'source-at-start' / relative).read_bytes()).hexdigest())
@@ -332,12 +333,77 @@ class LiveTest(unittest.TestCase):
         self.assertEqual('failed', state['capture']['state'])
         self.assertIn('失敗', state['message'])
 
-    def test_context_retains_old_evidence_and_does_not_supply_uncertain_rows(self):
+    def test_context_retains_old_evidence_and_meaningful_uncertain_rows(self):
         lines = [{'id': str(i), 'text': 't', 'start_seconds': i, 'end_seconds': i + 1,
                   'uncertain': i == 8} for i in range(10)]
         selected = live.select_analysis_lines(lines, {'headline': {'text': 'previous', 'source_ids': ['0']}},
                                               window_seconds=2, max_lines=4)
-        self.assertEqual(['0', '7', '9'], [x['id'] for x in selected])
+        self.assertEqual(['0', '7', '8', '9'], [x['id'] for x in selected])
+        self.assertTrue(selected[2]['uncertain'])
+
+    def test_context_excludes_only_explicit_filler_without_changing_raw_source(self):
+        lines = [{'id': 'filler', 'text': 'um, uh...', 'start_seconds': 0, 'end_seconds': 1,
+                  'language': 'en', 'uncertain': True, 'doubt_reasons': ['repetition']},
+                 {'id': 'meaning', 'text': 'So we should not remove 17 cases.', 'start_seconds': 1,
+                  'end_seconds': 2, 'language': 'en', 'uncertain': True, 'doubt_reasons': ['no_speech']}]
+        original = json.dumps(lines)
+        selected = live.select_analysis_lines(lines, None)
+        self.assertEqual(['meaning'], [row['id'] for row in selected])
+        self.assertEqual(['no_speech'], selected[0]['doubt_reasons'])
+        self.assertEqual(original, json.dumps(lines))
+
+    def test_saved_legacy_state_keeps_uncertain_exclusion_counts_without_policy_upgrade(self):
+        app = self.app()
+        for field in ('source_policy_version', 'included_uncertain_lines', 'excluded_sources'):
+            app.state['translation'].pop(field, None)
+        app.state['translation'].update(enabled=True, state='completed', pending_lines=0,
+                                        excluded_uncertain_lines=1)
+        app.state['lines'] = [{'id': 'c000000-l0000', 'text': 'Do not remove 17 cases.',
+            'start_seconds': 0, 'end_seconds': 1, 'language': 'en', 'uncertain': True,
+            'doubt_reasons': ['no_speech']}]
+        app.state['session'] = {'id': 'saved-legacy-session'}
+        app.state['capture'].update(state='completed', audio_seconds=1)
+        app.state['asr'].update(state='completed', through_seconds=1)
+        app.state['analysis']['state'] = 'completed'
+        snapshot = app.snapshot()
+        self.assertEqual(0, snapshot['translation']['pending_lines'])
+        self.assertEqual(1, snapshot['translation']['excluded_uncertain_lines'])
+        self.assertEqual(0, snapshot['analysis']['untranslated_lines'])
+        self.assertNotIn('source_policy_version', snapshot['translation'])
+        self.assertNotIn('included_uncertain_lines', snapshot['translation'])
+        self.assertNotIn('excluded_sources', snapshot['translation'])
+        self.assertFalse(snapshot['processing_active'])
+
+    def test_saved_current_policy_state_counts_meaningful_uncertain_pending_source(self):
+        app = self.app()
+        app.state['translation'].update(enabled=True, state='waiting')
+        app.state['session'] = {'id': 'saved-policy-session'}
+        app.state['lines'] = [{'id': 'c000000-l0000', 'text': 'Do not remove 17 cases.',
+            'start_seconds': 0, 'end_seconds': 1, 'language': 'en', 'uncertain': True,
+            'doubt_reasons': ['no_speech']}]
+        snapshot = app.snapshot()
+        self.assertEqual(1, snapshot['translation']['source_policy_version'])
+        self.assertEqual(1, snapshot['translation']['pending_lines'])
+        self.assertEqual(1, snapshot['translation']['included_uncertain_lines'])
+        self.assertEqual(0, snapshot['translation']['excluded_uncertain_lines'])
+        self.assertEqual(1, snapshot['analysis']['untranslated_lines'])
+
+    def test_saved_unknown_source_policy_is_rejected_without_changing_state(self):
+        for version in (0, 2, True, '1', None, 1.0):
+            with self.subTest(version=version):
+                app = self.app()
+                app.state['session'] = {'id': 'saved-unsupported-policy'}
+                app.state['translation'].update(source_policy_version=version, enabled=True,
+                    state='completed', pending_lines=0, excluded_uncertain_lines=1)
+                app.state['lines'] = [{'id': 'c000000-l0000', 'text': 'Do not remove 17 cases.',
+                    'start_seconds': 0, 'end_seconds': 1, 'language': 'en', 'uncertain': True,
+                    'doubt_reasons': ['no_speech']}]
+                original = json.dumps(app.state, sort_keys=True)
+                with self.assertRaisesRegex(ValueError, 'ポリシー'):
+                    app.snapshot()
+                self.assertEqual(original, json.dumps(app.state, sort_keys=True))
+                self.assertIsNone(app.worker)
+                self.assertIsNone(app.result_dir)
 
     def test_shutdown_reports_unfinished_work(self):
         entered, release = threading.Event(), threading.Event()
@@ -379,10 +445,10 @@ class LiveTest(unittest.TestCase):
         self.assertLessEqual(request['input_bytes'], 22000)
         self.assertEqual(lines[-1], selected[-1])
 
-    def test_live_freezes_uncertain_breaks_without_adding_their_text_to_model_input(self):
+    def test_live_freezes_filler_breaks_without_adding_their_text_to_model_input(self):
         from lecture_analysis import build_snapshot_request
         lines = [{'id': 'a', 'text': 'The first statement.', 'start_seconds': 0, 'end_seconds': 4, 'language': 'en'},
-                 {'id': 'uncertain', 'text': 'OMITTED_UNCERTAIN_MARKER', 'start_seconds': 4, 'end_seconds': 5,
+                 {'id': 'uncertain', 'text': 'um, uh...', 'start_seconds': 4, 'end_seconds': 5,
                   'language': 'en', 'uncertain': True},
                  {'id': 'b', 'text': 'The next statement.', 'start_seconds': 5, 'end_seconds': 9, 'language': 'en'}]
         calls = []
@@ -406,7 +472,25 @@ class LiveTest(unittest.TestCase):
             include_block_translations=True, block_translation_breaks=calls[0][1]['block_translation_breaks'])
         self.assertEqual([['a'], ['b']], request['block_translation_groups'])
         self.assertEqual(request['input_bytes'], prepared['selection']['input_bytes'])
-        self.assertNotIn('OMITTED_UNCERTAIN_MARKER', json.dumps(request['messages']))
+        self.assertNotIn('um, uh...', json.dumps(request['messages']))
+
+    def test_live_freezes_uncertainty_reasons_and_keeps_meaningful_evidence(self):
+        from lecture_analysis import build_snapshot_request
+        app = self.app()
+        app.state['lines'] = [{'id': 'c000000-l0000', 'text': 'Do not remove 17 cases.',
+            'start_seconds': 0, 'end_seconds': 4, 'language': 'en', 'uncertain': True,
+            'doubt_reasons': ['no_speech']}]
+        app.state['session'] = {'id': 'synthetic-session'}
+        app.result_dir = self.root / 'results'
+        prepared = app._prepare_analysis()
+        self.assertEqual(['c000000-l0000'], prepared['translation_ids'])
+        self.assertEqual([], prepared['selection']['block_translation_breaks'])
+        app.state['lines'][0]['doubt_reasons'].append('repetition')
+        request = build_snapshot_request(prepared['lines'], translation_ids=prepared['translation_ids'])
+        payload = json.loads(request['messages'][1]['content'])
+        self.assertEqual('Do not remove 17 cases.', payload['transcript'][0]['text'])
+        self.assertTrue(payload['transcript'][0]['uncertain'])
+        self.assertEqual(['no_speech'], payload['transcript'][0]['doubt_reasons'])
 
     def test_failed_startup_preparation_allows_later_start(self):
         app = self.app()

@@ -220,6 +220,7 @@ class DemoTests(unittest.TestCase):
         later = timeline.snapshot(22)
         self.assertEqual(later['translation']['pending_lines'], 1)
         self.assertEqual(later['translation']['excluded_uncertain_lines'], 1)
+        self.assertNotIn('included_uncertain_lines', later['translation'])
         self.assertEqual(later['translation']['native_lines'], 1)
         self.assertEqual(len(timeline.snapshot(34.999)['translation']['blocks']), 1)
         final = timeline.snapshot(35)
@@ -248,11 +249,147 @@ class DemoTests(unittest.TestCase):
                 self.write_rows('translation-history.jsonl', current)
                 with self.assertRaises(DemoDataError): DemoTimeline(self.directory)
 
+    def uncertain_translation_fixture(self):
+        histories, measured = self.continuous_fixture()
+        state = json.loads((self.directory / 'state.json').read_text())
+        for lines in (state['lines'], self.transcripts[1]['lines']):
+            row = next(line for line in lines if line['id'] == 'uncertain')
+            row.update(text='They are not limited to one party.', doubt_reasons=['timestamp_outside_audio'])
+        state['translation']['source_policy_version'] = 1
+        for history in histories:
+            history['selection'] = {'source_policy_version': 1, 'excluded_sources': []}
+        histories[1]['selection']['excluded_sources'] = [{'source_id': 'native', 'reason': 'native_language'}]
+        block = histories[1]['blocks'][0]
+        block.update(source_ids=['two', 'uncertain'], uncertain_source_ids=['uncertain'],
+                     uncertainty_reasons={'uncertain': ['timestamp_outside_audio']})
+        measured[1]['target_source_ids'] = ['two', 'uncertain']
+        state['translation']['blocks'] = [block for history in histories for block in history['blocks']]
+        self.write('state.json', state)
+        self.write_rows('transcript.jsonl', self.transcripts)
+        self.write_rows('translation-history.jsonl', histories)
+        self.write_rows('measurements.jsonl', self.measurements + measured)
+        return histories, measured
 
+    def test_versioned_translation_preserves_uncertain_negation_and_rewind(self):
+        histories, _ = self.uncertain_translation_fixture()
+        timeline = DemoTimeline(self.directory)
+        self.assertEqual(timeline.snapshot(22)['translation']['pending_lines'], 2)
+        self.assertEqual(timeline.snapshot(22)['translation']['excluded_uncertain_lines'], 0)
+        self.assertEqual(timeline.snapshot(22)['translation']['included_uncertain_lines'], 1)
+        self.assertEqual(timeline.snapshot(18)['translation']['included_uncertain_lines'], 0)
+        self.assertEqual(len(timeline.snapshot(34.999)['translation']['blocks']), 1)
+        final = timeline.snapshot(35)
+        self.assertEqual(final['translation']['covered_source_ids'], ['one', 'two', 'uncertain'])
+        self.assertEqual(final['translation']['included_uncertain_lines'], 1)
+        self.assertEqual(final['translation']['blocks'][1], histories[1]['blocks'][0])
+        original = next(line for line in final['lines'] if line['id'] == 'uncertain')
+        self.assertTrue(original['uncertain'])
+        self.assertEqual(original['doubt_reasons'], ['timestamp_outside_audio'])
+        self.assertEqual(timeline.snapshot(18)['translation']['covered_source_ids'], ['one'])
+        final['translation']['blocks'][1]['uncertainty_reasons']['uncertain'].append('mutated')
+        self.assertEqual(timeline.snapshot(35)['translation']['blocks'][1]['uncertainty_reasons'],
+                         {'uncertain': ['timestamp_outside_audio']})
 
+    def test_uncertain_translation_needs_explicit_supported_history_policy(self):
+        histories, _ = self.uncertain_translation_fixture()
+        for version in (None, 0, 2, True, '1'):
+            with self.subTest(version=version):
+                modified = deepcopy(histories)
+                if version is None:
+                    modified[1]['selection'].pop('source_policy_version')
+                else:
+                    modified[1]['selection']['source_policy_version'] = version
+                self.write_rows('translation-history.jsonl', modified)
+                with self.assertRaises(DemoDataError): DemoTimeline(self.directory)
 
+    def test_new_session_counts_require_an_explicit_recorded_policy(self):
+        self.uncertain_translation_fixture()
+        state = json.loads((self.directory / 'state.json').read_text())
+        configuration = json.loads((self.directory / 'runtime-manifest.json').read_text())
+        for marker in ('state', 'configuration', 'both', 'neither'):
+            with self.subTest(marker=marker):
+                final, manifest = deepcopy(state), deepcopy(configuration)
+                if marker in ('configuration', 'neither'):
+                    final['translation'].pop('source_policy_version')
+                if marker in ('configuration', 'both'):
+                    manifest['configuration']['translation_source_policy_version'] = 1
+                self.write('state.json', final)
+                self.write('runtime-manifest.json', manifest)
+                snapshot = DemoTimeline(self.directory).snapshot(22)
+                self.assertEqual(snapshot['translation']['pending_lines'], 1 if marker == 'neither' else 2)
+                self.assertEqual(snapshot['translation']['excluded_uncertain_lines'], 1 if marker == 'neither' else 0)
+        for invalid in (2, True, '1', None):
+            with self.subTest(invalid=invalid):
+                manifest = deepcopy(configuration)
+                manifest['configuration']['translation_source_policy_version'] = invalid
+                self.write('runtime-manifest.json', manifest)
+                with self.assertRaises(DemoDataError): DemoTimeline(self.directory)
 
+    def test_versioned_failed_session_keeps_meaningful_pending_and_exclusion_audit(self):
+        self.continuous_fixture()
+        state = json.loads((self.directory / 'state.json').read_text())
+        for lines in (state['lines'], self.transcripts[1]['lines']):
+            next(line for line in lines if line['id'] == 'uncertain').update(
+                text='They are not limited to one party.', doubt_reasons=['timestamp_outside_audio'])
+            lines.extend([
+                {'id': 'filler', 'text': 'Um, uh.', 'language': 'en', 'uncertain': True,
+                 'start_seconds': 17, 'end_seconds': 18, 'doubt_reasons': ['no_speech']},
+                {'id': 'c000001-l0000', 'text': 'A meaningful repeated clause.', 'language': 'en',
+                 'uncertain': True, 'start_seconds': 18, 'end_seconds': 18,
+                 'doubt_reasons': ['timestamp_outside_audio', 'repetition']},
+                {'id': 'c000001-l0001', 'text': 'A meaningful repeated clause.', 'language': 'en',
+                 'uncertain': True, 'start_seconds': 18, 'end_seconds': 18,
+                 'doubt_reasons': ['timestamp_outside_audio', 'repetition']},
+            ])
+        state['translation'].update(source_policy_version=1, state='failed', blocks=[], error='recorded failure')
+        self.write('state.json', state)
+        self.write_rows('transcript.jsonl', self.transcripts)
+        self.write_rows('measurements.jsonl', [row for row in self.measurements if row['stage'] == 'asr'])
+        self.write_rows('translation-history.jsonl', [])
+        self.write_rows('analysis-history.jsonl', [])
+        before = {path.name: path.read_bytes() for path in self.directory.iterdir()}
+        timeline = DemoTimeline(self.directory)
+        final = timeline.snapshot(timeline.duration)
+        self.assertEqual(final['translation']['state'], 'failed')
+        self.assertEqual(final['translation']['pending_lines'], 4)
+        self.assertEqual(final['translation']['excluded_uncertain_lines'], 2)
+        self.assertEqual(final['translation']['included_uncertain_lines'], 2)
+        self.assertEqual(final['translation']['native_lines'], 1)
+        self.assertEqual(final['translation']['excluded_sources'], [
+            {'source_id': 'filler', 'reason': 'filler_only', 'duplicate_of': None},
+            {'source_id': 'c000001-l0001', 'reason': 'duplicate_invalid_timing', 'duplicate_of': 'c000001-l0000'},
+        ])
+        self.assertNotIn('exclusion_reason', final['lines'][-1])
+        self.assertEqual(before, {path.name: path.read_bytes() for path in self.directory.iterdir()})
 
+    def test_versioned_translation_rejects_excluded_or_invalid_sources(self):
+        histories, measured = self.uncertain_translation_fixture()
+        state = json.loads((self.directory / 'state.json').read_text())
+        for change in ('excluded_target', 'future_exclusion', 'unknown_exclusion', 'duplicate_exclusion',
+                       'self_duplicate', 'unknown_duplicate', 'native_target', 'unknown_target', 'duplicate_target', 'blank_target'):
+            with self.subTest(change=change):
+                current, measurement, final = deepcopy(histories), deepcopy(measured), deepcopy(state)
+                transcripts = deepcopy(self.transcripts)
+                exclusions = current[1]['selection']['excluded_sources']
+                if change == 'excluded_target': exclusions.append({'source_id': 'uncertain', 'reason': 'repeated_text', 'duplicate_of': 'two'})
+                if change == 'future_exclusion': current[0]['selection']['excluded_sources'] = deepcopy(exclusions)
+                if change == 'unknown_exclusion': exclusions.append({'source_id': 'missing', 'reason': 'empty'})
+                if change == 'duplicate_exclusion': exclusions.extend(deepcopy(exclusions))
+                if change == 'self_duplicate': exclusions[0]['duplicate_of'] = 'native'
+                if change == 'unknown_duplicate': exclusions[0]['duplicate_of'] = 'missing'
+                if change in ('native_target', 'unknown_target', 'duplicate_target'):
+                    target = {'native_target': 'native', 'unknown_target': 'missing', 'duplicate_target': 'two'}[change]
+                    current[1]['blocks'][0]['source_ids'].append(target)
+                    measurement[1]['target_source_ids'].append(target)
+                if change == 'blank_target':
+                    for lines in (final['lines'], transcripts[1]['lines']):
+                        next(line for line in lines if line['id'] == 'uncertain')['text'] = ' '
+                final['translation']['blocks'] = [block for history in current for block in history['blocks']]
+                self.write('state.json', final)
+                self.write_rows('transcript.jsonl', transcripts)
+                self.write_rows('translation-history.jsonl', current)
+                self.write_rows('measurements.jsonl', self.measurements + measurement)
+                with self.assertRaises(DemoDataError): DemoTimeline(self.directory)
 
     def test_recorded_schedules_and_audio_progress(self):
         self.continuous_fixture()

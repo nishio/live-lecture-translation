@@ -22,7 +22,11 @@ Raw recognized speech remains the evidence layer. A future correction system sho
 
 ## Translation tracks unfinished work
 
-`lecture_translation.py` plans blocks from the oldest eligible untranslated utterances. Eligibility excludes empty, Japanese, uncertain, and already covered source lines. Blocks do not cross excluded or discontinuous source boundaries.
+`lecture_translation.py` plans blocks from the oldest eligible untranslated utterances. Meaningful uncertain lines remain targets with normalized `doubt_reasons`. Empty, Japanese, already covered and explicitly policy-excluded source lines are not targets. Blocks do not cross excluded or discontinuous source boundaries.
+
+`lecture_source_policy.py` supplies the same versioned content decision to translation, analysis selection, pending counts and completion. Version 1 excludes empty rows, uncertain English rows consisting only of `um`/`uh`/`erm`, and a narrow duplicate artifact: adjacent uncertain rows with identical text, language and timing in the same ASR chunk, invalid-timestamp reasons on both and a repetition reason on the later row. The first copy remains. Length, `so`, negation, numbers, thanks and a repetition flag alone never suffice for exclusion. Excluded text cannot return as translation context. Original rows remain intact; derived `excluded_sources` records carry the source ID, reason and duplicate origin separately from translation coverage.
+
+Canonical source hashes and frozen requests include allowlisted uncertainty reasons; unsupported or missing uncertain reasons become `unknown`, never a confidence probability. Prompts distinguish timing-only uncertainty from text reliability and require unresolved wording to remain uncertain. Published blocks retain `uncertain_source_ids` and `uncertainty_reasons`. Selection policy version 1 is saved in request history, runtime configuration and state; unmarked old saved sessions retain their original eligibility/counting behavior. Frozen retries retain the exact reasons and source hashes, and a reason change while generation is in progress prevents coverage from advancing.
 
 The extraction's planning limits are at most three groups per request, each at most eight lines, 45 seconds, and 2,000 bytes, with a 6,000-byte total target cap. Up to 45 seconds of already available source context on either side can accompany the selected targets. Future speech is not available to the request.
 
@@ -46,7 +50,7 @@ Continuous translation has a nominal 60-second interval; analysis has a nominal 
 
 The standard [cloud launcher](../start.command) explicitly selects `gpt-6.1-sol` for translation and analysis. MLX Whisper performs audio recognition locally. The shared adapter also supports `gpt-6-luna` and uses it when no model is supplied at that layer; this fallback does not override the launcher's explicit choice.
 
-Each request contains fixed system instructions, a JSON user message, and a required JSON output schema. The current [adapter payload](../audio-array/event_insights_cloud.py) is text-only and has no search or other tool configuration. It does not attach audio, repository/wiki content, or a conversation history. The normalized transcript rows contain only `id`, `start_seconds`, `end_seconds`, `text`, `language`, and `uncertain`.
+Each request contains fixed system instructions, a JSON user message, and a required JSON output schema. The current [adapter payload](../audio-array/event_insights_cloud.py) is text-only and has no search or other tool configuration. It does not attach audio, repository/wiki content, or a conversation history. The normalized transcript rows contain only `id`, `start_seconds`, `end_seconds`, `text`, `language`, `uncertain`, and `doubt_reasons`.
 
 | Workload | User-message fields | Selected source and output |
 | --- | --- | --- |
@@ -73,7 +77,7 @@ The server retains its recent 60 snapshots in normal state, while the authentica
 
 The coordinator keeps capture, recognition, translation, and analysis state visible. A stale or unsuccessful state query means that current state is unknown. It does not mean recording has stopped.
 
-The dashboard stop action stops new capture and follows the remaining recognition, translation, and final analysis. Application interruption is a different path: remaining work may be left pending. Automatic resumption after process exit is not implemented in 0.9.
+The dashboard stop action stops new capture and follows the remaining recognition, translation, and final analysis. Application interruption is a different path: remaining work may be left pending. Automatic resumption after process exit is not implemented.
 
 Storage locks and state snapshots are separated so that status can expose the last confirmed progress when an I/O operation is slow. The reader's input watchdog shares its thread with I/O; it cannot by itself guarantee recovery from a filesystem operation that never returns. A responsive stop request can therefore report that completion is unconfirmed.
 

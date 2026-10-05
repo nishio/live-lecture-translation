@@ -42,7 +42,7 @@ Connection errors may involve networking, DNS, proxies, or TLS; timeouts can als
 
 In continuous mode, a failed connectivity precheck before sending a request is rechecked on a nominal 30-second schedule. The post-v0.9 continuous cloud coordinator also retries recoverable actual request failures, up to three additional attempts started within five minutes of the first temporary failure. It respects server retry delays and retains failed inputs and cost reservations. Authentication, quota, unexplained 429, budget and invalid-response failures require attention. Use 「自動再試行を保留」 to pause future automatic attempts, or the stage-specific manual retry after resolving a blocking cause. Manual retry does not bypass a remaining server minimum wait; do not clear uncertain cost reservations.
 
-Saved local recognition lets that running session resume translation using text only. It does not guarantee rapid recovery: during capture, the usual translation interval and shared cloud request slot still apply. Check the pending-line count and translation progress as processing resumes. Do not restart the application as a recovery shortcut; automatic restart recovery is not implemented in v0.9.
+Saved local recognition lets that running session resume translation using text only. It does not guarantee rapid recovery: during capture, the usual translation interval and shared cloud request slot still apply. Check the pending-line count and translation progress as processing resumes. Do not restart the application as a recovery shortcut; automatic restart recovery is not implemented.
 
 ## Check actual progress
 
@@ -58,7 +58,7 @@ Translations are queued on a nominal 60-second schedule and understanding suppor
 
 New source text appears above its contextual Japanese translation in the left column. Understanding support appears on the right. Holding a view or choosing an earlier result does not stop capture or processing.
 
-The highlighted line is the latest line visible at the selected point. Gray recognition is uncertain and may be excluded from translation. Untranslated eligible lines, excluded uncertain lines, and Japanese source lines are different categories.
+The highlighted line is the latest line visible at the selected point. Gray recognition is uncertain; meaningful content is still sent to translation with its uncertainty reasons. Only narrow filler/duplicate rules exclude uncertain text, preserving an audit record. Pending counts include meaningful uncertain targets. Japanese source lines need no Japanese translation. Old saved sessions without the new policy marker retain their historical exclusions and counts.
 
 Recognition processes a 15-second audio chunk at a time by default, so several source lines can appear together. Repeated adjacent uncertain lines with identical text apart from case and whitespace are shown once. Their original source records remain intact; ordinary source lines and different text are not merged.
 
@@ -66,7 +66,7 @@ Recognition processes a 15-second audio chunk at a time by default, so several s
 
 Use the dashboard stop action and wait for capture saving and the remaining recognition, translation, and final analysis. Check their completion states before closing the application. Retain the session data when a stage fails or its completion cannot be confirmed.
 
-If automatic attempts have been paused or exhausted, or the error is not retryable, use the dedicated translation retry after the underlying issue is resolved. Do not infer successful completion from a disappeared terminal or a closed browser. Interrupting the process may leave pending work; 0.9 does not automatically resume it after a restart.
+If automatic attempts have been paused or exhausted, or the error is not retryable, use the dedicated translation retry after the underlying issue is resolved. Do not infer successful completion from a disappeared terminal or a closed browser. Interrupting the process may leave pending work; the application does not automatically resume it after a restart.
 
 ## Preserve a working session
 
@@ -78,7 +78,7 @@ A saved browser URL can stop authenticating after a restart. Use the current lau
 
 First confirm that capture and processing are inactive. Preserve ignored session files as well as Git history, verify the private copy against a manifest, and retain shared dependencies referenced by symbolic links. Record the completion, failure, and pending state of each processing stage. A successful backup does not make a failed session successful.
 
-Restoring the Git checkout alone does not restore ignored recordings or results. Verify the private snapshot, path mapping, shared ledger and model dependencies, and current authorization before enabling any processing. Do not overwrite existing evidence or automatically resend pending work. Version 0.9 has no automatic restart recovery. See the [engineering rules](../wiki/engineering-decisions.md#restore-application-evidence-separately-from-git-history).
+Restoring the Git checkout alone does not restore ignored recordings or results. Verify the private snapshot, path mapping, shared ledger and model dependencies, and current authorization before enabling any processing. Do not overwrite existing evidence or automatically resend pending work. The application has no automatic restart recovery. See the [engineering rules](../wiki/engineering-decisions.md#restore-application-evidence-separately-from-git-history).
 
 ## Handle saved files
 

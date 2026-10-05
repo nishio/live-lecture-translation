@@ -5,7 +5,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
 llt_repo="${0:A:h}"
 cd -- "$llt_repo"
 if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
-  print -u2 -- 'v0.9 requires macOS on Apple Silicon for native capture and MLX ASR.'
+  print -u2 -- 'Native capture and MLX ASR require macOS on Apple Silicon.'
   exit 1
 fi
 command -v python3 >/dev/null || { print -u2 -- 'Install Python 3.12 or newer first.'; exit 1; }

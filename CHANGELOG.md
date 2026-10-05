@@ -2,7 +2,15 @@
 
 ## Unreleased
 
+## 1.0.0-rc.1 — 2026-10-05
+
+Release candidate for Apple Silicon Macs. See the [release notes and acceptance status](docs/release-1.0.md). This is not the final 1.0 release.
+
+- License the project under GNU AGPL version 3 only (AGPL-3.0-only), except where otherwise noted; preserve the public sample's CC BY attribution and notices.
+
 - Accept local MP3, M4A, video and noncanonical WAV files in recorded-audio experiments. Convert and trim internally, preserve the original, and reuse the exact prepared audio for recognition and playback. Bundle the decoder in setup and retain source/conversion provenance.
+- Preserve meaningful uncertain recognition as translation and analysis input with normalized reason metadata. Apply shared conservative filler/duplicate exclusions, retain original evidence and exclusion audits, align pending/retry/completion handling, and keep old saved sessions on their historical policy.
+- Verify saved analysis inputs using their recorded uncertainty metadata while retaining compatibility with older six-field requests; reject altered or missing reason evidence.
 - Prefer sentence-like source-row endings in every continuous translation block and retain unfinished tails with a distinct continuation-wait state. Preserve explicit reasons for fragments forced by limits, source gaps, processed-audio timeout or final drain; boundary waits consume no generation interval and retries retain frozen inputs. This first stage keeps whole-row coverage and does not integrate provisional ASR or revise published translations.
 - Add an explicit offline ASR probe comparing 2–30-second chunks and revisable rolling windows, with separate warmup, processing measurements, estimated publication timing, and retained incomplete work. Record the authorized public-audio comparison without changing live defaults.
 - Collapse adjacent repeated uncertain recognition into one reading row, allowing case/whitespace differences while preserving every source record, uncertainty flag and publication time.

@@ -22,6 +22,10 @@ def fake_translation(plan, **options):
             'generated_at': time.time(), 'cost_usd': 0}
 
 
+def fake_uncertain_asr(chunk, *args):
+    result = fake_asr(chunk, *args)
+    result['chunks'][0]['raw_result']['segments'][0].update(no_speech_prob=.99, avg_logprob=-4)
+    return result
 
 
 class ContinuousTest(unittest.TestCase):
@@ -94,12 +98,14 @@ class ContinuousTest(unittest.TestCase):
         app.start({'provider': 'openai'}, replay=self.wave(300), pace=0)
         self.wait(app)
         state = app.snapshot()
-        eligible = [row['id'] for row in state['lines'] if not row['uncertain'] and row['language'] != 'ja']
+        eligible = [row['id'] for row in state['lines'] if row['language'] != 'ja']
         covered = [identity for block in state['translation']['blocks'] for identity in block['source_ids']]
         self.assertEqual(eligible, covered)
-        self.assertEqual(18, len(covered))
+        self.assertEqual(19, len(covered))
         self.assertEqual(1, state['translation']['native_lines'])
-        self.assertEqual(1, state['translation']['excluded_uncertain_lines'])
+        self.assertEqual(0, state['translation']['excluded_uncertain_lines'])
+        self.assertEqual(1, state['translation']['included_uncertain_lines'])
+        self.assertEqual(1, state['translation']['source_policy_version'])
         self.assertEqual(0, state['translation']['pending_lines'])
         self.assertEqual('completed', state['translation']['state'])
         self.assertEqual('c000000-l0000', plans[0]['target_source_ids'][0])
@@ -169,13 +175,17 @@ class ContinuousTest(unittest.TestCase):
             if not options['retry_failed']:
                 raise RuntimeError('synthetic API outcome unknown')
             return fake_translation(plan, **options)
-        app = self.app(translator=translate)
+        app = self.app(translator=translate, transcriber=fake_uncertain_asr)
         app.start({'provider': 'openai'}, replay=self.audio, pace=0)
         self.wait(app)
         state = app.snapshot()
         self.assertEqual('completed', state['asr']['state'])
         self.assertEqual('failed', state['translation']['state'])
         self.assertEqual(3, state['translation']['pending_lines'])
+        self.assertEqual(3, state['translation']['included_uncertain_lines'])
+        self.assertEqual(0, state['translation']['excluded_uncertain_lines'])
+        self.assertTrue(all(row['uncertain'] for row in attempts[0][0]['source_lines']))
+        self.assertTrue(all(row['doubt_reasons'] == ['no_speech'] for row in attempts[0][0]['source_lines']))
         self.assertTrue(state['translation']['retry_required'])
         self.assertEqual([], state['translation']['blocks'])
         self.assertEqual(1, len(attempts))
@@ -607,7 +617,7 @@ class ContinuousTest(unittest.TestCase):
     def test_final_fragment_is_saved_with_reason_and_finishes(self):
         plans = []
         def unfinished(chunk, *args):
-            result = fake_asr(chunk, *args)
+            result = fake_uncertain_asr(chunk, *args)
             result['chunks'][0]['raw_result']['segments'][0]['text'] = 'The result depends on'
             return result
         def translate(plan, **options):
@@ -619,12 +629,73 @@ class ContinuousTest(unittest.TestCase):
         state = app.snapshot()['translation']
         self.assertEqual(0, state['pending_lines'])
         self.assertEqual('completed', state['state'])
+        self.assertEqual(3, state['included_uncertain_lines'])
+        self.assertEqual(0, state['excluded_uncertain_lines'])
         self.assertEqual(['end_of_input'], [block['boundary_reason'] for block in state['blocks']])
+        source_ids = [row['id'] for row in app.state['lines']]
+        self.assertEqual(source_ids, state['blocks'][0]['uncertain_source_ids'])
+        self.assertEqual({identity: ['no_speech'] for identity in source_ids},
+                         state['blocks'][0]['uncertainty_reasons'])
         history = json.loads((app.result_dir / 'translation-history.jsonl').read_text().splitlines()[0])
         self.assertEqual(plans[0]['selection'], history['selection'])
+        self.assertEqual(1, history['selection']['source_policy_version'])
+        saved = json.loads((app.result_dir / 'state.json').read_text())
+        self.assertEqual(state['blocks'], saved['translation']['blocks'])
+        self.assertEqual(source_ids, history['blocks'][0]['uncertain_source_ids'])
 
+    def test_only_uncertain_meaningful_source_triggers_final_analysis_and_translation(self):
+        analyses = []
+        def analyze(lines, previous, **options):
+            analyses.append(deepcopy(lines))
+            return fake_analysis(lines, previous, **options)
+        app = self.app(transcriber=fake_uncertain_asr, analyzer=analyze)
+        app.start({'provider': 'openai'}, replay=self.audio, pace=0)
+        self.wait(app)
+        state = app.snapshot()
+        self.assertTrue(analyses)
+        self.assertTrue(all(row['uncertain'] for batch in analyses for row in batch))
+        self.assertEqual('completed', state['analysis']['state'])
+        self.assertEqual('completed', state['translation']['state'])
+        self.assertEqual(0, state['translation']['pending_lines'])
+        self.assertEqual(3, len([identity for block in state['translation']['blocks'] for identity in block['source_ids']]))
+        self.assertFalse(state['processing_active'])
 
+    def test_filler_only_source_finishes_with_explicit_exclusion_audit(self):
+        def filler(chunk, *args):
+            result = fake_uncertain_asr(chunk, *args)
+            result['chunks'][0]['raw_result']['segments'][0]['text'] = 'um, uh...'
+            return result
+        translate = Mock(side_effect=AssertionError('Excluded filler must not create a translation request'))
+        analyze = Mock(side_effect=AssertionError('Excluded filler must not create an analysis request'))
+        app = self.app(transcriber=filler, translator=translate, analyzer=analyze)
+        app.start({'provider': 'openai'}, replay=self.audio, pace=0)
+        self.wait(app)
+        state = app.snapshot()
+        self.assertEqual(3, len(state['lines']))
+        self.assertTrue(all(row['text'] == 'um, uh...' for row in state['lines']))
+        self.assertEqual(0, state['translation']['pending_lines'])
+        self.assertEqual(0, state['translation']['included_uncertain_lines'])
+        self.assertEqual(3, state['translation']['excluded_uncertain_lines'])
+        self.assertEqual([{'source_id': row['id'], 'reason': 'filler_only', 'duplicate_of': None}
+                          for row in state['lines']], state['translation']['excluded_sources'])
+        self.assertFalse(state['processing_active'])
+        translate.assert_not_called()
+        analyze.assert_not_called()
 
+    def test_reason_only_source_change_rejects_inflight_translation_publication(self):
+        from lecture_translation import TranslationResponseError
+        app = self.boundary_app(text='Do not remove 17 cases.', through=3)
+        app.state['lines'][0].update(uncertain=True, doubt_reasons=['no_speech'])
+        prepared = app._prepare_translation()
+        self.assertIsNotNone(prepared)
+        frozen = deepcopy(prepared['plan'])
+        app.state['lines'][0]['doubt_reasons'] = ['repetition']
+        with self.assertRaisesRegex(TranslationResponseError, '変化'):
+            app._translate(prepared)
+        self.assertEqual(frozen, prepared['plan'])
+        self.assertEqual([], app.state['translation']['blocks'])
+        self.assertEqual(1, app.snapshot()['translation']['pending_lines'])
+        self.assertFalse((app.result_dir / 'translation-history.jsonl').exists())
 
     def test_failed_asr_span_splits_translation_and_retains_failed_evidence(self):
         def broken(chunk, *args):

@@ -19,6 +19,7 @@ import secrets
 from urllib.parse import parse_qs, urlsplit
 import wave
 
+from lecture_source_policy import SOURCE_POLICY_VERSION, plan_source_policy
 
 
 HERE = Path(__file__).resolve().parent
@@ -44,6 +45,14 @@ def load_rows(path):
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
 
 
+def source_policy_version(record):
+    """Only an explicit supported marker opts saved evidence into new policy."""
+    if not isinstance(record, dict) or 'source_policy_version' not in record:
+        return None
+    version = record['source_policy_version']
+    if type(version) is not int or version != SOURCE_POLICY_VERSION:
+        raise DemoDataError('保存された翻訳原文ポリシーの版に対応していません。')
+    return version
 
 
 class DemoAudio:
@@ -103,6 +112,10 @@ class DemoTimeline:
         self.analysis_events = []
         self.translation_events = []
         self.continuous = bool(final.get('translation', {}).get('enabled'))
+        self.source_policy_version = source_policy_version(final.get('translation', {}))
+        if 'translation_source_policy_version' in self.configuration:
+            configured_policy = source_policy_version({'source_policy_version': self.configuration['translation_source_policy_version']})
+            self.source_policy_version = self.source_policy_version or configured_policy
         self.failures = self._optional_rows('generation-events.jsonl')
         self.failures = [row for row in self.failures if row.get('event') == 'failed'
                          and row.get('stage') in {'analysis', 'translation'}]
@@ -204,6 +217,8 @@ class DemoTimeline:
                     or not numeric(measurement.get('through_seconds'))):
                 raise DemoDataError('連続翻訳の処理記録が不正です。')
             selection = history.get('selection', {})
+            policy_version = source_policy_version(selection)
+            excluded = self._translation_exclusions(selection, started, line_publications) if policy_version else {}
             additions = deepcopy(history.get('blocks'))
             if not isinstance(additions, list) or not additions:
                 raise DemoDataError('連続翻訳のまとまりがありません。')
@@ -217,7 +232,8 @@ class DemoTimeline:
                 for identity in identities:
                     source = self.all_lines.get(identity) if isinstance(identity, str) else None
                     if (source is None or identity in covered or line_publications[identity] > started
-                            or source.get('uncertain') or source.get('language') == 'ja' or not source.get('text', '').strip()):
+                            or (source.get('uncertain') and policy_version is None)
+                            or identity in excluded or source.get('language') == 'ja' or not source.get('text', '').strip()):
                         raise DemoDataError('連続翻訳の根拠が重複・未公開・対象外です。')
                     covered.add(identity)
                 seen_ids.add(block['id'])
@@ -225,11 +241,31 @@ class DemoTimeline:
             if target_ids != measurement.get('target_source_ids'):
                 raise DemoDataError('連続翻訳の対象IDが公開記録と一致しません。')
             blocks.extend(additions)
-            self.translation_events.append({'at': published, 'began_at': started, 'blocks': additions})
+            self.translation_events.append({'at': published, 'began_at': started, 'blocks': additions,
+                'source_policy_version': policy_version, 'excluded_sources': list(excluded.values())})
         final_blocks = self.final.get('translation', {}).get('blocks', [])
         if self.continuous and blocks != final_blocks:
             raise DemoDataError('保存された最終翻訳と公開履歴が一致しません。')
 
+    def _translation_exclusions(self, selection, started, line_publications):
+        """Check frozen request exclusions without reclassifying accepted history."""
+        rows = selection.get('excluded_sources', [])
+        if not isinstance(rows, list):
+            raise DemoDataError('連続翻訳の除外記録が不正です。')
+        exclusions = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                raise DemoDataError('連続翻訳の除外記録が不正です。')
+            identity, reason = row.get('source_id'), row.get('reason')
+            if (not isinstance(identity, str) or identity not in self.all_lines or identity in exclusions
+                    or line_publications[identity] > started or not isinstance(reason, str) or not reason.strip()):
+                raise DemoDataError('連続翻訳の除外根拠が重複・未公開・不正です。')
+            duplicate = row.get('duplicate_of')
+            if duplicate is not None and (not isinstance(duplicate, str) or duplicate == identity
+                    or duplicate not in self.all_lines or line_publications[duplicate] > started):
+                raise DemoDataError('連続翻訳の重複参照が不正です。')
+            exclusions[identity] = deepcopy(row)
+        return exclusions
 
     def _validate_measurement(self, row):
         if any(not numeric(row.get(key)) for key in ('published_at', 'through_seconds', 'processing_seconds', 'capture_seconds')):
@@ -359,9 +395,22 @@ class DemoTimeline:
                 capture_state, capture_error = 'failed', saved_capture.get('error') or '保存時の音声入力の完了は未確認です。'
         analysis_state, analysis_error, analysis_diagnostics = self._stage('analysis', self.analysis_events, at)
         translation_state, translation_error, translation_diagnostics = self._stage('translation', self.translation_events, at)
-        eligible = [line for line in lines if line.get('language') != 'ja' and not line.get('uncertain') and line.get('text', '').strip()]
-        excluded_uncertain = sum(bool(line.get('uncertain')) for line in lines)
-        native = sum(line.get('language') == 'ja' and not line.get('uncertain') for line in lines)
+        if self.source_policy_version is not None:
+            planned = plan_source_policy(lines)
+            excluded_sources = [{'source_id': line['id'], 'reason': line['exclusion_reason'],
+                                 'duplicate_of': line['duplicate_of']}
+                                for line in planned if line['exclusion_reason'] is not None]
+            eligible = [line for line in planned if line['exclusion_reason'] is None and line.get('language') != 'ja']
+            included_uncertain = sum(line['uncertain'] for line in eligible)
+            excluded_uncertain = sum(line['uncertain'] and line['exclusion_reason'] is not None for line in planned)
+            native = sum(line.get('language') == 'ja' and line['exclusion_reason'] is None for line in planned)
+        else:
+            # Historical selection was different. Never manufacture new pending
+            # work merely because the replay application has a newer policy.
+            eligible = [line for line in lines if line.get('language') != 'ja' and not line.get('uncertain') and line.get('text', '').strip()]
+            excluded_sources = []
+            excluded_uncertain = sum(bool(line.get('uncertain')) for line in lines)
+            native = sum(line.get('language') == 'ja' and not line.get('uncertain') for line in lines)
         pending = sum(line['id'] not in covered for line in eligible)
         if self.continuous and pending and translation_state == 'completed':
             translation_state = 'waiting'
@@ -388,6 +437,9 @@ class DemoTimeline:
                                 'pending_lines': pending if self.continuous else 0,
                                 'excluded_uncertain_lines': excluded_uncertain,
                                 'native_lines': native,
+                                **({'source_policy_version': self.source_policy_version, 'excluded_sources': excluded_sources,
+                                    'included_uncertain_lines': included_uncertain}
+                                   if self.source_policy_version is not None else {}),
                                 'error': translation_error, 'retry_required': False, 'worker_alive': False,
                                 'schedule': self._schedule('translation', self.translation_events, at, translation_state, capture_seconds, translation_diagnostics)},
                 'lines': lines, 'analysis_history': history,
