@@ -81,7 +81,7 @@ Section completion to source publication measured median 0.833 seconds, p95 0.91
 
 ## Additional handoff records
 
-[Development handoff measurements](development-handoff.md) preserves a separate historical pre-event audit and a partial live cost snapshot found while consolidating related development work. These supplemental records are not included in the original four-experiment JSON/CSV bundle and are not final event results.
+[Development handoff measurements](development-handoff.md) preserves a historical pre-event audit, a partial live cost snapshot, and [5 hours 16 minutes of real Mac microphone use](development-handoff.md#long-microphone-field-use). The preserved field run reached the saved audio end in ASR but ended with capture input loss, HTTP 429 failures and 131 eligible lines untranslated. These supplemental records are not included in the original four-experiment JSON/CSV bundle; the partial cost snapshot remains separate from the final stage outcomes.
 
 ## Costs and absent measurements
 

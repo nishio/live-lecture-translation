@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Correct release evidence to include the earlier 5-hour-16-minute Mac microphone field run and its capture/cloud failures, alongside the separate accelerated six-hour storage test. Keep current uncertainty handling distinct from historical exclusions.
 - Clarify why microphone preparation needs Swift, the available Ollama translation/analysis path and evaluated `qwen3:4b` quality, and the different meanings of recording stop, shutdown, breaks and starting a new lecture. Record indefinite post-stop connectivity waiting as unresolved release work.
 
 ## 1.0.0-rc.1 — 2026-10-05

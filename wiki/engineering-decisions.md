@@ -96,9 +96,15 @@ The post-retrospective implementation freezes failed request input across bounde
 
 ## Retire a checkout without erasing unfinished work
 
-Process absence, successful storage, completed recognition, and completed generation are separate facts. In a preserved field run, capture reported input loss after saving about 5 hours 17 minutes; recognition reached the saved audio end, while translation and analysis reported HTTP 429 and 131 eligible source lines remained untranslated. The retirement record establishes these stored states, not a fresh operational observation or an end-to-end success. It does not establish the cause of the missing PCM input or the particular provider-side condition behind HTTP 429.
+Process absence, successful storage, completed recognition, and completed generation are separate facts. In a preserved field run, capture reported input loss after saving 5 hours 16 minutes 36.864 seconds; recognition reached the saved audio end, while translation and analysis reported HTTP 429 and 131 eligible source lines remained untranslated. The [stage aggregates](../docs/experiments/development-handoff.md#long-microphone-field-use) preserve this long-session evidence. The retirement record establishes these stored states, not a fresh operational observation or an end-to-end success. It does not establish the cause of the missing PCM input or the particular provider-side condition behind HTTP 429.
 
 An inactive checkout can be retired after its files, failure states, pending targets, and cost reservations are verifiably preserved. Confirm absence of the relevant processes and listener as well as consulting saved status; neither alone proves full processing success. Record the unresolved stages and a recovery location before removing the working copy. Archiving does not authorize retrying failed requests or starting the replacement application. A recovery design must reconcile saved target IDs with durable results and request reservations, retain failed attempts, and validate current authorization before any new request.
+
+## Carry historical validation into release assessments
+
+A later candidate without its own microphone acceptance does not erase earlier field testing. The 1.0 review initially described only short public trials even though this wiki already held the multi-hour Mac field outcome. The user identified that omission. Carry both completed and failed stages into the README and release evidence, with the tested version and remaining failures; do not translate “no successful full completion” into “no long-session testing.”
+
+Keep the six-hour accelerated synthetic storage test, the 5-hour-16-minute Mac microphone field run, and Android THINKLET endurance observations distinct. Likewise, describe current uncertainty eligibility from the candidate's code, while retaining historical excluded counts as facts about older results. The current policy preserves meaningful uncertain speech with reasons; it does not retroactively regenerate saved sessions.
 
 ## Restore application evidence separately from Git history
 

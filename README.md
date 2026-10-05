@@ -107,8 +107,9 @@ You can set a spending limit in [cloud configuration](docs/cloud-configuration.m
 This application is experimental.
 
 - Recognition and translation can be wrong, especially for names and incomplete sentences. Generated key points and explanations can also contain errors.
-- Source text may be translated even when recognition is uncertain; a translation does not establish that the speech was heard correctly. Some fillers and repeated text are omitted from translation, while the original text and exclusion reasons remain saved.
-- Published short trials do not establish long microphone-session reliability, battery life, performance in adverse acoustics, or network recovery. Improvements in comprehension while listening have not been measured.
+- Meaningful uncertain recognition remains eligible for translation and analysis with its uncertainty reasons; a translation does not establish that the speech was heard correctly. Some fillers and repeated text are omitted from translation, while the original text and exclusion reasons remain saved.
+- An earlier version had [5 hours 16 minutes 36.864 seconds of real Mac microphone field use](docs/experiments/development-handoff.md#long-microphone-field-use). Recognition reached the end of the saved audio, but capture ended on input loss and translation/analysis failed with HTTP 429, leaving 131 eligible lines untranslated. This is long-session experience with unresolved failures.
+- Separately, an [accelerated six-hour synthetic storage test](docs/experiments/README.md#accelerated-capture-storage) verified all 1,441 chunks. It was not six hours of real-time microphone operation. Mac battery endurance, accuracy in adverse acoustics, recovery performance and improvements in comprehension while listening remain unmeasured.
 - Automatic recovery of unfinished work after the application exits is not implemented.
 
 See [experiment records](docs/experiments/README.md) for detailed conditions and results. Translation trials using saved recognition output cannot establish fresh microphone capture performance, recognition accuracy, or speech-to-screen latency. See the [v0.9.0 release notes](docs/release-0.9.md) for that release's features and validation scope.

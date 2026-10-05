@@ -1,6 +1,26 @@
 # Additional development handoff measurements
 
-These are selected numeric aggregates from existing private development records. No recording, recognized speech, generated lecture content, ledger, or API payload is included. They were not rerun while consolidating the repository and are not the final results of the event.
+These are selected numeric aggregates from existing private development records. No recording, recognized speech, generated lecture content, ledger, or API payload is included. They were not rerun while consolidating the repository. Pre-event checks, partial cost observations and preserved end-of-session states are distinguished below.
+
+## Long microphone field use
+
+On 2026-10-04, the earlier Mac continuous-translation application was used with a real microphone at an event. Its preserved final state records the following outcomes. These aggregates were checked again against the private capture/ASR/translation/analysis state on 2026-10-05 without opening source speech or rerunning processing.
+
+| Stage or quantity | Preserved result |
+| --- | --- |
+| Saved microphone audio | 18,996.864 seconds: 5 hours 16 minutes 36.864 seconds |
+| Saved capture chunks / PCM frames | 1,267 / 303,949,824 |
+| Capture | Failed after 10 seconds without PCM input; process exit and stop confirmed |
+| Recognition | Completed through 18,996.864 seconds; queue empty; no failed ASR chunks recorded |
+| Translation / analysis | Both failed with HTTP 429 |
+| Eligible source lines left untranslated | 131 |
+| Uncertain source lines excluded under the old policy | 894 |
+
+This establishes multi-hour microphone use and recognition through the saved audio end. It also documents capture and cloud-processing failures; it is not a successful end-to-end completion. The records do not establish why PCM input stopped or which provider condition caused HTTP 429. Recognition completion is not a measure of recognition accuracy. The 131 pending eligible lines are separate from the 894 lines excluded by the historical uncertainty policy; the current candidate keeps meaningful uncertain recognition eligible, without rewriting old results.
+
+The observation predates the current release candidate and its source-policy/recovery changes. It should inform the release assessment, while candidate-specific checks remain separate. Mac battery endurance, recovery throughput, adverse-acoustics accuracy and listening-comprehension gains were not measured. The partial cost snapshot below is not a final cost reconciliation for this run.
+
+The separate [six-hour storage trial](README.md#accelerated-capture-storage) supplied synthetic audio in 47.130 seconds and verified storage integrity. It did not run a microphone for six wall-clock hours. Long recordings and battery observations from the originating project's Android THINKLET device concern different hardware and must not be used as Mac endurance results.
 
 ## Older pre-event audit
 
