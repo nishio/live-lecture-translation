@@ -6,6 +6,7 @@
 - Add an explicit offline ASR probe comparing 2–30-second chunks and revisable rolling windows, with separate warmup, processing measurements, estimated publication timing, and retained incomplete work. Record the authorized public-audio comparison without changing live defaults.
 - Collapse adjacent repeated uncertain recognition into one reading row, allowing case/whitespace differences while preserving every source record, uncertainty flag and publication time.
 - Replay saved runs from the beginning at 1×, optionally synchronized to a local WAV, with pause, restart and seeking. Reveal continuous translations at their recorded publication times and retain the final processing tail after the audio ends.
+- Add an attributed CC BY public-video sample with uncorrected recognition, Japanese translations, understanding history and measured API cost. Document audio acquisition; keep the recording and raw runtime artifacts excluded.
 - Remove routine reading-pane metadata, source-count controls, AI disclaimer labels, detail disclosures and the separate history list. Keep original speech, generated content, direct history navigation, timers and actionable errors.
 - Permit replay-only cloud authorization with a zero microphone allowance; reject every microphone-text request while retaining past reservations.
 - Add an original-speech circle showing observed audio remaining until the next recognition chunk, with distinct recognition, queue, input-stall, failure and completion states.

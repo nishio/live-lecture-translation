@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "title": "Audrey Tang Remarks in Plurality Seoul, 2023 12 02 (字幕あり)",
+  "speaker": "Audrey Tang",
+  "publisher": "Code for Japan",
+  "source_url": "https://www.youtube.com/watch?v=4_tge6XJhGA",
+  "publication_date": "2023-12-26",
+  "retrieved_at": "2026-10-04T17:39:01.169089+00:00",
+  "license": {
+    "name": "CC BY (Creative Commons Attribution)",
+    "youtube_notice": "Creative Commons Attribution license (reuse allowed)",
+    "version_in_saved_video_metadata": null,
+    "evidence_url": "https://www.youtube.com/watch?v=4_tge6XJhGA",
+    "youtube_license_help": "https://support.google.com/youtube/answer/2797468?hl=en",
+    "current_help_license_link": "https://creativecommons.org/licenses/by/4.0/",
+    "note": "The saved video metadata does not specify a version. The current YouTube help links to CC BY 4.0; this is a reference, not confirmation of a version in the original video notice. The separate CC0 publication announcement is not used to omit attribution."
+  },
+  "attribution": "Audrey Tang, speech published by Code for Japan: Audrey Tang Remarks in Plurality Seoul, 2023 12 02 (字幕あり). Source video carries a CC BY notice. Machine transcription, Japanese translation and understanding notes produced by live-lecture-translation; no endorsement by the speaker or publisher is implied.",
+  "transformations": [
+    "Complete audio decoded from YouTube format 140 AAC to 16 kHz mono PCM16 WAV.",
+    "Fresh local MLX Whisper recognition in 15-second chunks; uncertain lines retained.",
+    "Japanese translation of eligible recognized lines and separate understanding notes generated with gpt-6.1-sol.",
+    "Selected content fields exported without correcting recognition or generated wording; runtime metadata omitted and publication timing expressed relative to run start.",
+    "Publisher-provided subtitles were not used as the recognition output or replaced by these outputs."
+  ],
+  "audio": {
+    "sha256": "da7a7c8202a28b24e3a24a0bcfd7f4da0a786c30884975101d60a876c34301f3",
+    "sample_rate": 16000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "frames": 5209072,
+    "duration_seconds": 325.567,
+    "included_in_repository": false,
+    "selected_range": "complete recording",
+    "source_format_id": "140"
+  },
+  "generation": {
+    "date": "2026-10-05",
+    "timezone": "Asia/Tokyo",
+    "asr_model": "mlx-community/whisper-large-v3-turbo",
+    "asr_model_revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb",
+    "provider": "openai",
+    "model": "gpt-6.1-sol",
+    "language": "en",
+    "pace": "realtime",
+    "chunk_seconds": 15,
+    "translation_interval_seconds": 60,
+    "analysis_interval_seconds": 120,
+    "semantic_quality_verified": false
+  },
+  "omitted": [
+    "Audio and video",
+    "Publisher subtitles",
+    "API payloads and raw responses",
+    "Runtime state and logs",
+    "Credentials, account/request identifiers and token-bearing URLs",
+    "Machine-specific paths, authorization and shared ledgers",
+    "Screenshots"
+  ]
+}

@@ -9,6 +9,7 @@ Development migration does not authorize a runtime cutover. Preserve a running s
 - v0.9.0 is the extracted baseline. Record later field feedback separately and implement it in subsequent versions.
 - Keep capture, ASR, translation, and analysis independently observable. A stop request is not proof of completion.
 - Never commit recordings, transcripts, translations, summaries, API payloads, response caches, credentials, token-bearing URLs, or screenshots of real sessions.
+- Explicit publication exception: the user approved the reviewed text sample in `samples/audrey-plurality-seoul-2023/` from the public Audrey Tang video. Keep its source attribution, CC BY notice, uncertainty and transformation notes. This exception covers only the allowlisted text/JSON sample and aggregate measurements, not audio, publisher subtitles, runtime state, API payloads/responses, credentials, ledgers or screenshots. Other session data stays private.
 - Runtime files belong in ignored data/ and results/. Tests use synthetic fixtures and temporary state directories.
 - Do not start real capture, model inference, or paid API requests as part of routine tests. Use explicit user authorization for those operations.
 - Do not modify another checkout's running application or shared state while developing this repository.

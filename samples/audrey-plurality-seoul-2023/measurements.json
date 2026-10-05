@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "scope": "Successful generation run only; earlier failed requests are separate.",
+  "audio_seconds": 325.567,
+  "elapsed_seconds": 350.9894595000078,
+  "completion_confirmed": true,
+  "configuration": {
+    "provider": "openai",
+    "model": "gpt-6.1-sol",
+    "language": "en",
+    "pace": "realtime",
+    "chunk_seconds": 15,
+    "translation_interval_seconds": 60,
+    "analysis_interval_seconds": 120
+  },
+  "coverage": {
+    "recognized_lines": 62,
+    "uncertain_lines": 15,
+    "eligible_translation_lines": 47,
+    "translated_source_lines": 47,
+    "translation_blocks": 12,
+    "analysis_versions": 4,
+    "pending_lines": 0,
+    "duplicate_translated_source_ids": 0,
+    "missing_eligible_source_ids": 0
+  },
+  "asr": {
+    "chunks": 22,
+    "inference_seconds": 22.275024123984622,
+    "api_usd": 0
+  },
+  "cloud": {
+    "translation": {
+      "requests": 6,
+      "usage": {
+        "input_tokens": 9732,
+        "output_tokens": 2090,
+        "cached_tokens": 0,
+        "cache_write_tokens": 8696
+      },
+      "usage_confirmed_api_usd": 0.044712,
+      "unconfirmed_reservation_usd": 0.0
+    },
+    "analysis": {
+      "requests": 4,
+      "usage": {
+        "input_tokens": 13205,
+        "output_tokens": 3359,
+        "cached_tokens": 0,
+        "cache_write_tokens": 13193
+      },
+      "usage_confirmed_api_usd": 0.0665965,
+      "unconfirmed_reservation_usd": 0.0
+    }
+  },
+  "usage_confirmed_api_usd": 0.1113085,
+  "pricing_verification": {
+    "verified_on": "2026-10-05",
+    "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+    "tier": "Standard short context",
+    "usd_per_million_tokens": {
+      "input": 2,
+      "cached_input": 0.1,
+      "cache_write": 2.5,
+      "output": 10
+    },
+    "arithmetic_recomputed_from_usage": true
+  },
+  "excluded_prior_failed_attempt": {
+    "requests": 2,
+    "reason": "insufficient_quota",
+    "unconfirmed_reservation_usd": 0.178775,
+    "final_api_usd": null
+  },
+  "limits": [
+    "Ledger charges are authoritative; retained reservations are not confirmed API cost.",
+    "Application cache hits send no request; confirmed cached_tokens are separate provider-side input-cache usage.",
+    "Attempt artifact counts include pre-request failures; matching ledger entries retain failed or unknown requests.",
+    "ASR timings cover saved successful reports; failed/interrupted inference time may be unmeasured.",
+    "Inference seconds exclude lock wait but include import/call and post-call report preparation; processing seconds include broader chunk work.",
+    "Publication timings do not measure browser rendering or human comprehension.",
+    "Codex/development-assistant usage, electricity and model download time are not measured here.",
+    "The 15 uncertain recognized lines were excluded from translation. Eligible-line coverage is not complete spoken-content coverage.",
+    "No human comprehension, semantic accuracy, or whole-audio listening score is established by this run."
+  ]
+}

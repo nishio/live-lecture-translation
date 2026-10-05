@@ -1,0 +1,788 @@
+{
+  "schema_version": 1,
+  "sample": "audrey-plurality-seoul-2023",
+  "provenance": "provenance.json",
+  "quality": "Uncorrected machine output; not a verified transcript or official translation.",
+  "lines": [
+    {
+      "id": "c000000-l0000",
+      "start_seconds": 0.0,
+      "end_seconds": 7.16,
+      "text": "Good local time. I'm Audrey Tang, co-author of Plurality, the Future of Collaborative Technology and Democracy.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 0,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000000-l0001",
+      "start_seconds": 7.16,
+      "end_seconds": 15.0,
+      "text": "It is a real pleasure to participate in this important event, celebrating the collaborative diversity at the heart of plurality.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 0,
+      "uncertain": true,
+      "doubt_reasons": [
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000001-l0000",
+      "start_seconds": 15.0,
+      "end_seconds": 23.12,
+      "text": "In the 1960s, the Internet as we know it began to take shape, heralding the dawn of a new",
+      "language": "en",
+      "chunk": 0,
+      "segment": 1,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000001-l0001",
+      "start_seconds": 23.12,
+      "end_seconds": 27.8,
+      "text": "era defined by hope, ideals, and change.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 1,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000001-l0002",
+      "start_seconds": 27.8,
+      "end_seconds": 30.0,
+      "text": "By the 1990s, it became a major change.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 1,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000002-l0000",
+      "start_seconds": 30.0,
+      "end_seconds": 37.24,
+      "text": "major driving force, and each of us participated in the transformation. Today, there is one question",
+      "language": "en",
+      "chunk": 0,
+      "segment": 2,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000002-l0001",
+      "start_seconds": 37.24,
+      "end_seconds": 44.74,
+      "text": "on the tip of our collective tongues. In the face of technological singularity, how can we open new",
+      "language": "en",
+      "chunk": 0,
+      "segment": 2,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0000",
+      "start_seconds": 45.0,
+      "end_seconds": 47.0,
+      "text": "and free the future.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0001",
+      "start_seconds": 47.0,
+      "end_seconds": 51.0,
+      "text": "The truth of the matter is democracy is under threat,",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0002",
+      "start_seconds": 51.0,
+      "end_seconds": 55.0,
+      "text": "especially from authoritarians attempting to use AI",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0003",
+      "start_seconds": 55.0,
+      "end_seconds": 59.0,
+      "text": "to undermine and weaken our foundation of trust.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0004",
+      "start_seconds": 59.0,
+      "end_seconds": 60.0,
+      "text": "In the future,",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition",
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0005",
+      "start_seconds": 60.0,
+      "end_seconds": 60.0,
+      "text": "the world is a very important part of the world.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition",
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0006",
+      "start_seconds": 60.0,
+      "end_seconds": 60.0,
+      "text": "The world is a very important part of the world.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition",
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0007",
+      "start_seconds": 60.0,
+      "end_seconds": 60.0,
+      "text": "The world is a very important part of the world.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition",
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0008",
+      "start_seconds": 60.0,
+      "end_seconds": 60.0,
+      "text": "The world is a very important part of the world.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition",
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000003-l0009",
+      "start_seconds": 60.0,
+      "end_seconds": 60.0,
+      "text": "The world is a very important part of the world.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 3,
+      "uncertain": true,
+      "doubt_reasons": [
+        "repetition",
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000004-l0000",
+      "start_seconds": 60.0,
+      "end_seconds": 66.0,
+      "text": "Internet freedom declined for the 13th consecutive year, according to the VFH.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 4,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000004-l0001",
+      "start_seconds": 66.0,
+      "end_seconds": 72.48,
+      "text": "Today, only a billion people live under democratic systems, while more than twice that number",
+      "language": "en",
+      "chunk": 0,
+      "segment": 4,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000004-l0002",
+      "start_seconds": 72.48,
+      "end_seconds": 74.48,
+      "text": "POIL under authoritarian rule.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 4,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000005-l0000",
+      "start_seconds": 75.0,
+      "end_seconds": 85.56,
+      "text": "As mentioned in the prologue of the book, the concept of plurality symbolizes the symbiosis of democracy and collaborative technology.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 5,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000005-l0001",
+      "start_seconds": 86.46,
+      "end_seconds": 90.0,
+      "text": "Facing the challenge of democratic backsliding, we can...",
+      "language": "en",
+      "chunk": 0,
+      "segment": 5,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000006-l0000",
+      "start_seconds": 90.0,
+      "end_seconds": 96.24,
+      "text": "a fresh foundation of mutual trust, cherished by all and revitalizing democracy along the way.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 6,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000006-l0001",
+      "start_seconds": 97.84,
+      "end_seconds": 104.8,
+      "text": "We are pursuing this new model in Taiwan where Shuwei stands for digital and plural.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 6,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000007-l0000",
+      "start_seconds": 105.0,
+      "end_seconds": 112.0,
+      "text": "Connecting communities while enabling knowledge to permeate across languages and cultures.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 7,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000007-l0001",
+      "start_seconds": 112.0,
+      "end_seconds": 120.0,
+      "text": "This October, UNIGF Kyoto highlighted global expectations for digital equality and inclusion.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 7,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000008-l0000",
+      "start_seconds": 120.0,
+      "end_seconds": 127.56,
+      "text": "At the event, I share Taiwan's innovative model of digital democracy amid a growing",
+      "language": "en",
+      "chunk": 0,
+      "segment": 8,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000008-l0001",
+      "start_seconds": 127.56,
+      "end_seconds": 135.0,
+      "text": "chorus of cross-sectoral support for AI democratization in partnership with the Collective Intelligence",
+      "language": "en",
+      "chunk": 0,
+      "segment": 8,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000009-l0000",
+      "start_seconds": 135.0,
+      "end_seconds": 140.92,
+      "text": "Project, OpenAI, Anthropic, and the Getting Plurality Research Network.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 9,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000009-l0001",
+      "start_seconds": 142.6,
+      "end_seconds": 150.0,
+      "text": "Now take a look at this. Every thought represents an opinion and sparkles like a star in the darkness.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 9,
+      "uncertain": true,
+      "doubt_reasons": [
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000010-l0000",
+      "start_seconds": 150.0,
+      "end_seconds": 156.4,
+      "text": "the background. The holistic reflections form constellations, providing us directions on",
+      "language": "en",
+      "chunk": 0,
+      "segment": 10,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000010-l0001",
+      "start_seconds": 156.4,
+      "end_seconds": 164.88,
+      "text": "alignment. For many participants, this is the first time they interacted with AI in the context",
+      "language": "en",
+      "chunk": 0,
+      "segment": 10,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000011-l0000",
+      "start_seconds": 165.0,
+      "end_seconds": 171.4,
+      "text": "deliberation, not as a solo conversation but as an evolving group discussion for the collective good.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 11,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000011-l0001",
+      "start_seconds": 173.16,
+      "end_seconds": 180.0,
+      "text": "Augmented deliberations like this means anybody and everybody can become a contributor and beneficiary.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 11,
+      "uncertain": true,
+      "doubt_reasons": [
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000012-l0000",
+      "start_seconds": 180.0,
+      "end_seconds": 184.72,
+      "text": "of digital democracy. This leads to improved societal resilience,",
+      "language": "en",
+      "chunk": 0,
+      "segment": 12,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000012-l0001",
+      "start_seconds": 184.72,
+      "end_seconds": 190.96,
+      "text": "enhancing information integrity, while deepening cross-cultural understanding and empathy.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 12,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000012-l0002",
+      "start_seconds": 192.0,
+      "end_seconds": 195.0,
+      "text": "Built upon open-source tools, they are not limited to the",
+      "language": "en",
+      "chunk": 0,
+      "segment": 12,
+      "uncertain": true,
+      "doubt_reasons": [
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000013-l0000",
+      "start_seconds": 195.0,
+      "end_seconds": 200.2,
+      "text": "limited to the interests of a single party. Instead, they are designed collaboratively,",
+      "language": "en",
+      "chunk": 0,
+      "segment": 13,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000013-l0001",
+      "start_seconds": 200.2,
+      "end_seconds": 206.4,
+      "text": "promoting the interconnectedness of collective intelligence.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 13,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000013-l0002",
+      "start_seconds": 206.4,
+      "end_seconds": 209.96,
+      "text": "From ancient Greece to the 21st century, humanity",
+      "language": "en",
+      "chunk": 0,
+      "segment": 13,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000014-l0000",
+      "start_seconds": 210.0,
+      "end_seconds": 216.08,
+      "text": "experience a transition from nomadic to agrarian and then to industrial societies.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 14,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000014-l0001",
+      "start_seconds": 217.04,
+      "end_seconds": 225.0,
+      "text": "Yet the idea of direct democracy has not completely disappeared. Through plurality, we are rediscovering",
+      "language": "en",
+      "chunk": 0,
+      "segment": 14,
+      "uncertain": true,
+      "doubt_reasons": [
+        "timestamp_outside_audio"
+      ],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000015-l0000",
+      "start_seconds": 225.0,
+      "end_seconds": 230.0,
+      "text": "the communal spirit of reciprocity on a higher plane.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 15,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000015-l0001",
+      "start_seconds": 230.0,
+      "end_seconds": 236.0,
+      "text": "Indeed, collaboration on the basis of shared values goes beyond delivering solutions solely",
+      "language": "en",
+      "chunk": 0,
+      "segment": 15,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000015-l0002",
+      "start_seconds": 236.0,
+      "end_seconds": 240.0,
+      "text": "to our local communities by participating in",
+      "language": "en",
+      "chunk": 0,
+      "segment": 15,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000016-l0000",
+      "start_seconds": 240.0,
+      "end_seconds": 246.24,
+      "text": "societal evaluations, measurements, and mitigations to common risks and harms,",
+      "language": "en",
+      "chunk": 0,
+      "segment": 16,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000016-l0001",
+      "start_seconds": 246.24,
+      "end_seconds": 252.64,
+      "text": "we can build a foundation of mutual trust, paving the way forward to a shared future.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 16,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000017-l0000",
+      "start_seconds": 255.0,
+      "end_seconds": 256.56,
+      "text": "is when it comes to the internet.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 17,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000017-l0001",
+      "start_seconds": 257.1,
+      "end_seconds": 258.96,
+      "text": "There are no geographical boundaries,",
+      "language": "en",
+      "chunk": 0,
+      "segment": 17,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000017-l0002",
+      "start_seconds": 259.52,
+      "end_seconds": 261.82,
+      "text": "only the proximity of values.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 17,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000017-l0003",
+      "start_seconds": 262.54,
+      "end_seconds": 265.32,
+      "text": "Faced with the rapid advancement of technology",
+      "language": "en",
+      "chunk": 0,
+      "segment": 17,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000017-l0004",
+      "start_seconds": 265.32,
+      "end_seconds": 268.62,
+      "text": "and the polarization intensified by globalization,",
+      "language": "en",
+      "chunk": 0,
+      "segment": 17,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000017-l0005",
+      "start_seconds": 269.54,
+      "end_seconds": 270.0,
+      "text": "the time...",
+      "language": "en",
+      "chunk": 0,
+      "segment": 17,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000018-l0000",
+      "start_seconds": 270.0,
+      "end_seconds": 277.68,
+      "text": "is ripe for us to double down on plurality. Through interoperable coexistence,",
+      "language": "en",
+      "chunk": 0,
+      "segment": 18,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000018-l0001",
+      "start_seconds": 277.68,
+      "end_seconds": 283.68,
+      "text": "we're achieving something impactful and significant, collaborative diversity.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 18,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000019-l0000",
+      "start_seconds": 285.0,
+      "end_seconds": 287.18,
+      "text": "In closing, let me offer a prayer.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 19,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000019-l0001",
+      "start_seconds": 288.92,
+      "end_seconds": 294.14,
+      "text": "When we see the Internet of Things, let's make it an Internet of Beings.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 19,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000019-l0002",
+      "start_seconds": 294.82,
+      "end_seconds": 299.26,
+      "text": "When we see virtual reality, let's make it a shared reality.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 19,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000020-l0000",
+      "start_seconds": 300.0,
+      "end_seconds": 304.0,
+      "text": "When we see machine learning, let's make it collaborative learning.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 20,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000020-l0001",
+      "start_seconds": 304.0,
+      "end_seconds": 310.0,
+      "text": "When we see user experience, let's make it about human experience.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 20,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000020-l0002",
+      "start_seconds": 310.0,
+      "end_seconds": 315.0,
+      "text": "And whenever we hear that the singularity is near, let us",
+      "language": "en",
+      "chunk": 0,
+      "segment": 20,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    },
+    {
+      "id": "c000021-l0000",
+      "start_seconds": 315.0,
+      "end_seconds": 324.54,
+      "text": "always remember the plurality is here. Thank you for your kind and generous attention. Live long and prosper.",
+      "language": "en",
+      "chunk": 0,
+      "segment": 21,
+      "uncertain": false,
+      "doubt_reasons": [],
+      "boundary_context": "non-overlapping audio; incomplete sentences may need following speech"
+    }
+  ]
+}
