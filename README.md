@@ -2,31 +2,41 @@
 
 [English](README.md) | [日本語](README.ja.md)
 
+A Mac application that captures English lectures and displays recognized speech, Japanese translations, key points, and concept explanations. Recording and speech recognition run on the Mac; translation and understanding support use cloud text processing.
+
 **The goal is to augment people's ability to understand lectures in another language, in real time.** For people whose first language is not English, following an English lecture takes additional cognitive resources compared with listening in their native language. AI should help with that language burden so that more attention remains for understanding the speaker's ideas.
 
-We design for use while listening: support should be easy to scan, its source easy to check, and earlier points easy to revisit. The measure of success is whether the listener can follow the lecture with less effort.
-
-Live English-to-Japanese lecture translation and notes from a Mac microphone. Audio capture and speech recognition run locally; optional cloud text processing builds continuous Japanese translations, key points, and explanations linked to the recognized speech.
-
-**Version 0.9 is a standalone extraction of an existing application.** It preserves the continuous-translation design while separating installation, configuration, and development from the original project. Historical experiment summaries are included; recordings, transcripts, translations, API responses, and screenshots from those experiments are not distributed.
-
-This is the canonical development home for the Mac lecture application. Future code changes, experiments, field feedback, and reusable lessons belong here; start with the [development wiki](wiki/index.md). The original device-specific project remains separate. Moving development here does not switch an already running recording session.
+We design for use while listening: support should help the listener quickly grasp what is being discussed now, how the discussion has developed so far, and which concepts matter most. The measure of success is whether the listener can follow the lecture with less effort.
 
 ## What it does
 
-- Records a selected Mac audio input as 16 kHz mono PCM and split WAV files.
-- Recognizes speech locally with MLX Whisper. The reference model is `large-v3-turbo`; the application reads a local model manifest.
-- Queues eligible untranslated speech in order, with a nominal translation interval of 60 seconds. Successful translations accumulate instead of disappearing at the next update.
-- Updates the topic, flow, key points, and concepts on a separate nominal 120-second schedule.
-- Links generated content to source utterances. An uncertain recognition remains visible and is excluded from translation input.
-- Keeps capture, recognition, and cloud generation independent. A slow or failed text request does not intentionally stop audio capture.
-- Shows recent processing progress while allowing the reader to hold a view or inspect an earlier result.
+- Records a selected Mac audio input and transcribes it locally with MLX Whisper.
+- Displays recognized speech above its Japanese translation. Translations accumulate instead of disappearing at the next update.
+- Organizes the topic, flow, key points, and important concepts into a view of the current discussion and supporting explanations.
+- Lets the reader hold the view, revisit earlier points, and browse a history of concept explanations.
+- Shows recording, recognition, translation, and analysis progress separately. A slow or failed cloud request does not intentionally stop recording.
 
-The dashboard is currently in Japanese. English speech with Japanese translation is the primary workflow; automatic and Japanese recognition are also available. Japanese source lines are not queued for Japanese translation.
+Translation becomes eligible to run at nominal 60-second intervals, and understanding support at 120-second intervals. Recognition, network time, and generation add delay, so these are not guaranteed result intervals. See the [operation guide](docs/operation.md) for controls and processing details.
+
+The dashboard is in Japanese and is designed to support English lecture listening with Japanese text. Automatic language detection and Japanese recognition are also available; Japanese source lines are not translated into Japanese.
+
+The development version includes unreleased features. See the [changelog](CHANGELOG.md) for changes by release.
+
+## Try it before a live lecture
+
+Before using the application at a lecture, try an existing recording on your Mac to see how transcription, Japanese translation, and key points appear.
+
+To use your own WAV file, follow the [recorded-audio guide](docs/audio-experiments.md). After setup, use `check` to inspect the audio file's format and duration, then `run` for transcription. The check performs no speech recognition or network requests.
+
+Enable cloud processing to try Japanese translation and key points as well. Use the [replay viewer](docs/audio-experiments.md#保存結果を冒頭から実時間で観察する) to see the generated results on screen.
+
+Explore the [sample output](samples/audrey-plurality-seoul-2023/README.md) to see the English transcription, Japanese translation, key points, concept explanations, and actual API cost. The source is [Audrey Tang's lecture](https://www.youtube.com/watch?v=4_tge6XJhGA), published by Code for Japan with a CC BY license notice. The generated output is uncorrected.
+
+Audio is not included. To try the same lecture audio, follow the [acquisition and conversion instructions](docs/audio-experiments.md#単独講演の入力例).
 
 ## Start
 
-Requirements: an Apple Silicon Mac, a microphone accessible to macOS, Python 3.12 or later, and the Swift compiler supplied with Apple's command line developer tools. MLX Whisper is the local recognition backend. This release has no Windows, Linux, or Intel Mac support claim.
+Requirements: an Apple Silicon Mac, a microphone accessible to macOS, Python 3.12 or later, and the Swift compiler supplied with Apple's command line developer tools. Windows, Linux, and Intel Macs have not been validated.
 
 From the repository directory:
 
@@ -46,15 +56,15 @@ The check does not start recording. The application opens a local dashboard on p
 
 Audio remains on the Mac in the normal microphone workflow; recognized text and the context selected from it are sent for cloud translation and analysis. See [operation](docs/operation.md) for the lifecycle and [data handling](docs/data-handling.md) before sharing generated files.
 
-`./start.command` without `--cloud` selects the local path. It does not enable continuous cloud translation. The retained local analysis path uses `qwen3:4b`; its historical semantic quality was not accepted, so it is not presented as equivalent to the cloud workflow.
+`./start.command` without `--cloud` selects the local path. It does not enable continuous cloud translation. Local analysis uses `qwen3:4b`, but prior evaluation found that it did not preserve meaning adequately. Start with the cloud configuration above to use lecture translation and understanding support.
 
 After recording, use the dashboard's stop button and wait for saving and remaining recognition, translation, and final analysis to finish. Keep the Mac powered and awake during capture. Closing the terminal is not equivalent to a completed recording session.
 
 ## Cost by lecture duration
 
-Local recording and MLX Whisper recognition do not incur an API charge. Cloud translation and analysis do. In one [historical live observation](docs/experiments/development-handoff.md#partial-live-cost-observation), their combined usage-confirmed cost was USD 0.630875 over a recent 30-minute window, equivalent to USD 1.26175 per hour. That run used the historical `gpt-6.1-sol` configuration with translation every nominal 60 seconds and analysis every nominal 120 seconds.
+Local recording and MLX Whisper recognition do not incur an API charge. Cloud translation and analysis do. In one [historical live observation](docs/experiments/development-handoff.md#partial-live-cost-observation), their combined usage-confirmed cost was about USD 0.63 over a 30-minute window, equivalent to about USD 1.26 per hour. That run used the historical `gpt-6.1-sol` configuration with translation every nominal 60 seconds and analysis every nominal 120 seconds.
 
-The following estimates assume that same rate continues: `estimated USD = 1.26175 × audio minutes / 60`, rounded to cents.
+The estimates below assume that same rate continues and are calculated from the unrounded observations.
 
 | Lecture audio duration | Estimated cloud translation + analysis cost (USD) |
 | --- | ---: |
@@ -66,38 +76,16 @@ The following estimates assume that same rate continues: `estimated USD = 1.2617
 
 These rows are extrapolations from a partial historical session, not measured runs of each length or current price quotes. Audio length alone does not determine cost: model pricing, speech density, context, output length, scheduling, and retries matter. The table includes no separate allowance for startup or final processing, failed requests, unresolved reservations, or other work sharing the daily budget. Development-assistant usage and Mac electricity were not measured. Use [cloud configuration](docs/cloud-configuration.md) to set a spending limit; this estimate does not guarantee completion within that limit.
 
-## How the pipeline fits together
-
-```text
-Mac microphone
-  -> native Swift capture -> local PCM/WAV + frame ledger
-  -> local MLX Whisper    -> timestamped source utterances
-  -> translation queue   -> accumulated Japanese translation
-  -> analysis scheduler  -> topic, flow, key points, concepts
-                              |
-                         local web dashboard
-```
-
-Capture is independent of recognition and generation. Translation and analysis share one cloud request slot. Their nominal schedules describe eligibility to run, not a promise that a new result appears every 60 or 120 seconds. Chunk completion, queued work, network time, and generation add delay.
-
-See the [architecture](docs/architecture.md) and the [development wiki](wiki/index.md) for the decisions behind this design.
-
 ## Evidence and limits
 
-[Experiments](docs/experiments/README.md) contains newly written summaries and content-free JSON/CSV aggregates from historical development measurements. For example, a 330-second continuous-translation trial covered all 60 eligible source lines in 12 blocks, with no duplicate or missing eligible lines. Median translation request duration was 10.162 seconds across six requests. **That trial reused saved recognition output:** it did not measure new microphone capture, recognition accuracy, or speech-to-screen latency.
+This application is experimental.
 
-Version 0.9 is an experimental release:
-
-- Long real-time microphone runs, battery life, adverse acoustics, and network recovery are not established by the published short or accelerated trials.
-- Recognition and translation can be wrong, especially for names and incomplete sentences. Structural checks and source references do not prove semantic accuracy.
+- Recognition and translation can be wrong, especially for names and incomplete sentences. Generated key points and explanations can also contain errors.
+- Uncertain recognition remains visible but is excluded from translation. A completed translation queue does not mean every spoken word was translated.
+- Published short trials do not establish long microphone-session reliability, battery life, performance in adverse acoustics, or network recovery. Improvements in comprehension while listening have not been measured.
 - Automatic recovery of unfinished work after the application exits is not implemented.
-- Recognition uncertainty can exclude source lines from translation. Queue coverage describes eligible recognized lines, not every spoken word.
-- Local analysis code is retained, but its historical structured-output success did not establish adequate meaning preservation. The reference translation workflow uses cloud text processing.
-- Cloud costs depend on transcript density, context, output length, model, and retries. Published cost extrapolations are historical estimates, not current pricing or spending guarantees.
 
-See [known limitations and the 0.9 boundary](docs/release-0.9.md).
-
-Later [v0.9 field feedback and planned improvements](wiki/migration-follow-ups.md#field-feedback-proper-name-recognition) cover proper names, experiments with user-supplied audio, cost visibility, and easier access to source text and earlier points. These are follow-ups, not fixes included in the v0.9.0 baseline.
+See [experiment records](docs/experiments/README.md) for detailed conditions and results. Translation trials using saved recognition output cannot establish fresh microphone capture performance, recognition accuracy, or speech-to-screen latency. See the [v0.9.0 release notes](docs/release-0.9.md) for that release's features and validation scope.
 
 ## Repository guide
 
@@ -106,12 +94,15 @@ Later [v0.9 field feedback and planned improvements](wiki/migration-follow-ups.m
 | `audio-array/` | Capture, local recognition, queues, providers, dashboard, and tests |
 | `docs/` | Architecture, operation, data handling, and release boundary |
 | `docs/experiments/` | Public measurement summaries without source content |
+| `samples/` | Transcription, translation, and key-point samples from public lectures |
 | `wiki/` | Reusable engineering decisions and open development questions |
 | `CHANGELOG.md` | Release-level changes |
 
-Recordings and generated session files are private working data. Keep them out of commits; a file being JSON, a log, a manifest, or a screenshot does not make it safe to publish. Public demos and regression fixtures should use newly authored or otherwise publishable material.
+Store recordings, transcripts, translations, and other session data in the ignored `data/` and `results/` directories; keep them out of commits. The Audrey Tang public-lecture text in `samples/` is an exception. Audio and raw runtime artifacts must remain private. See [data handling](docs/data-handling.md) for details.
 
 ## Development checks
+
+To understand how processing works, read the [architecture](docs/architecture.md). For design rationale and proposed improvements, see the [development wiki](wiki/index.md).
 
 With the Python environment active, run the test suite and the two JavaScript checks:
 
@@ -121,8 +112,10 @@ node audio-array/tests/test_lecture_ui.js
 node audio-array/tests/test_lecture_demo_ui.js
 ```
 
-The extracted 0.9 source passed 315 Python tests; two Swift synthetic-audio tests were skipped, with no failures. Both Node checks passed. This run did not record audio, perform speech inference, send an API request, or test a clean installation. See [release validation](docs/release-0.9.md#extraction-validation) for the exact scope.
+Routine tests use synthetic data and do not start real microphone capture, model inference, or paid API requests. Swift synthetic-audio tests are opt-in.
 
 ## License
 
 A license has not yet been selected for this release. Publication of the repository alone does not grant an open-source license.
+
+The [Audrey sample's source attribution and CC BY notice](samples/audrey-plurality-seoul-2023/README.md#出典と帰属) apply to that source material, not to the repository's application code.

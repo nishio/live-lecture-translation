@@ -1,0 +1,97 @@
+# Useful understanding support and interview reuse
+
+This page distills 2026-10-05 feedback about translation wording, the focus display, concept explanations, reading continuity, search, model inputs, and a possible interview-support variant. It records proposed behavior and open evaluations. The [architecture](../docs/architecture.md#what-the-cloud-model-receives) documents the current inputs and display behavior; no feature changes are made by this page.
+
+## Implementation status after the retrospective
+
+The subsequent development update implements the contextual-translation and focus labels, a refined explanation prompt, direct previous/next interpretation controls, and a persistent concept timeline. The browser retains received explanations, deduplicates identical versions, preserves changed versions and reading position, and can page older disk history. Source excerpt disclosures were tried and then removed after the real-audio screen review; provenance remains in saved data. Live process indicators continue independently of the reading position. A circular countdown shows the next start/retry wait, not the time until an explanation will be ready. See [operation](../docs/operation.md#reading-without-losing-your-place) and [unreleased changes](../CHANGELOG.md#unreleased).
+
+Later layout feedback requires a viewport-height reading workspace, an adjustable original/translation divider, and countdown circles that remain stationary as their labels change. The implementation keeps overflow inside the reading panes, stores the divider preference locally, and reserves a fixed timer width. These are controls for attention and reading comfort, not measured comprehension improvements.
+
+The original-speech pane now also has a fixed-position circle. It shows confirmed audio remaining until the next chunk boundary; recognition, queueing, stalled input and unresolved failures have explicit states without completion estimates. Its clock follows audio progress rather than elapsed browser time. Demonstration intervals must match the stated configuration, or explicitly identify accelerated timing: a short remaining wait must not imply that translation runs more often than new source becomes available.
+
+The reading layout subsequently places original speech above contextual Japanese translation in the left column. The right column emphasizes the current interpretation, key points, and word explanations. Full process details open for newly observed problems without reopening the same dismissed alert on each poll. Countdown circles retain a short visible state, with full timing and retry actions inside a disclosure. Uncertain source text remains visually muted and unfinished processing must remain observable. Reduced cognitive load remains an unmeasured hypothesis.
+
+Reviewing the real-audio result, the user identified time ranges, source-count controls, detail disclosures, a separate history list, routine AI disclaimers and fee/reservation labels as distractions. Remove that class of routine metadata from the reading screen rather than waiting for each redundant label to be named. The Japanese reading pane shows translated prose within each block, including continuous, older block and fragment-fallback views. The right column shows understanding content and word explanations without source buttons or origin badges. Keep the previous/next arrows, reading controls and actionable errors. Preserve source IDs, uncertainty, concept origin, timing and historical visibility in saved data and explain limitations in documentation; omitting a label does not validate AI-generated content. The saved-result viewer no longer repeats cost information over the lecture. Measured costs belong in the accompanying sample record.
+
+The statements below describing the replacing concept panel and old wording refer to the v0.9 baseline. Retrieval, selective model escalation, revised completed translations, and interview workflows remain proposals. The prompt update has synthetic contract coverage, not a new measurement of explanation quality or listening comprehension.
+
+## Make each display answer a listener's question
+
+The user asked what 「訳し直し」 actually does and what should occupy 「論点」. In continuous mode the former is newly generated translation of pending source, not revision of completed translation. A candidate label is 「文脈付きの日本語訳」. Reserve a term such as 「訳を見直す」 for an actual revision operation with an explicit target, reason, and preserved old version. Do not conflate retrying failed work with correcting successful output.
+
+For the focus area, compare a compact 「いま伝えていること」 view organized around:
+
+- The speaker's current claim, or an explicitly marked question/example when there is no complete claim.
+- The reason or concrete example needed to understand it.
+- The connection to the previous point: support, elaboration, objection, or qualification, only when source evidence supports that relationship.
+
+This is a candidate task definition, not a measured optimum or a heading-only rename. Avoid showing the same sentence again as headline, summary, and flow. Evaluate whether a listener can restate the main idea and its support while keeping up, using the [granularity rubric](migration-follow-ups.md#field-feedback-explanation-granularity-and-speaker-claims). Longer historical and whole-lecture views belong to the [separate review path](live-and-review-pipeline.md).
+
+## Concepts should remove an obstacle to understanding
+
+The user reported a concept explanation that amounted to 「詳しい説明はない」. This is a qualitative output report; the private output and its input were not reread here. Stating that an explanation is missing does not itself help the listener understand the term. A lack of definition in the selected excerpt also does not establish that the entire lecture never explained it.
+
+The current prompt already allows model general knowledge as labeled `background`, alongside explanations grounded in the lecture. Larger-model knowledge is therefore not a wholly absent mechanism; neither its usefulness nor its accuracy is guaranteed. The missing capabilities include retrieval, focused elaboration, and retaining explanations across updates. Treat unresolved identity or insufficient evidence as a small pending clarification state, not a completed explanation card filled with a non-explanation. Do not manufacture a definition merely to fill the space.
+
+A useful concept card should explain what the term means and why it matters to the current passage, concisely, with a concrete example when it helps. Keep three origins distinguishable in the proposed design:
+
+| Origin | Meaning and supporting reference |
+| --- | --- |
+| Lecture explanation | What the speaker explained, linked to source speech |
+| Model background | General knowledge supplied to help the reader, labeled unverified; mention IDs identify where the term arose |
+| Retrieved background | An explanation based on inspected external sources, with direct citations and retrieval time; not attributed to the speaker |
+
+The retrieved-background category would require an extension of the current two-value concept schema; it is not implemented. External background must remain distinct from evidence used to summarize the speaker's claims. Distinguish a term's general definition from why it is relevant in this passage, especially if the ASR spelling is uncertain.
+
+## Let AI do the lookup work when it is useful
+
+The user suggested one-click keyword search, then asked whether AI should also search and summarize. A search link remains a useful direct action, but a better candidate for limited attention is 「この言葉を調べる」: resolve the intended term from available context, retrieve and inspect relevant sources, and return a short contextual explanation with citations and optional detail.
+
+Stable, familiar concepts may be explained from model knowledge; obscure proper names, ambiguous terms, changing facts, and requests for verification are candidates for retrieval. This routing is a proposal to evaluate, not proof that either method always suffices. Show ambiguity, failed searches, and unsupported claims instead of plausible invented citations. Use the minimum external query context needed; unrelated lecture text should not automatically accompany a keyword lookup.
+
+Keep background research independent from live translation scheduling and display. It should have its own visible pending/failure state, cancellation, deduplication/cache policy, and cost allowance. Automatic research of every keyword could consume both attention and processing budget. First compare a user-triggered lookup with model-only explanation on the same questions; evaluate automatic suggestions afterward. No lookup, new API call, or search integration was performed for this feedback.
+
+## Keep explanations available while they are being read
+
+The user reports that concepts disappear during reading and wants to reach earlier explanations by scrolling. Source inspection confirms that current analysis updates replace the concept list; prior concepts remain in analysis snapshots but have no dedicated accumulated timeline.
+
+Proposed acceptance criteria: append timestamped concept cards to a scrollable history, preserve the reader's scroll anchor, selection, focus, and expanded references, and signal new explanations without moving the reading position. Repeated unchanged explanations should not crowd the view; a changed explanation should retain its earlier version and provenance. Provide an explicit return to the latest items and a way to keep a useful card available. Access to older persisted entries should not be silently limited to the current 60-snapshot UI window. Test new analysis arriving while the reader is partway through a long explanation, including keyboard navigation and older-history loading.
+
+## Evaluate model need separately for each workload
+
+The standard cloud launcher selects Sol, but the [input contract](../docs/architecture.md#what-the-cloud-model-receives) is a pair of bounded text workloads: translation and understanding support. One analysis request returns the different understanding fields together. The current requests carry neither audio nor web results. The published historical Sol trial and the retained local-model limitations do not establish that every translation or concept explanation requires Sol.
+
+Compare candidate models using the same source revisions, selection, instructions, and output contract. Score translation fidelity separately from useful explanations, explicit uncertainty, and source attribution, alongside delay and cost. Compare adding retrieval separately from increasing model size; changing both at once hides which helped. Selective escalation for unresolved explanations is a candidate rather than an implemented fallback. No model setting or prompt was changed.
+
+## Memo: interview support as an adjacent use case
+
+The user has a personal need for an interview-support variant. Keep this as an exploration note in the same repository; do not start a separate application or assume an interviewer's or interviewee's workflow is already specified.
+
+Possible capabilities to validate include speaker-attributed notes, question/answer pairing, unanswered or partially answered points, and source-grounded follow-up question suggestions. During the conversation, minimize distraction and preserve the interviewee's wording and qualifications. Afterward, organize answers and themes with links to the original speech and explicit revisions. Suggested questions and background research must remain distinguishable from what participants actually said. Reuse capture, recognition, provenance, and review components where they fit, while evaluating this conversation-specific objective separately from lecture translation. No interview session or prototype was started.
+
+## Evaluation material must match the listening task
+
+The first real-audio screen review should use one speaker explaining a subject. The user rejected Broad Listening in Practice because it is a conversation with multiple speakers; a freely licensed conversation does not satisfy this single-speaker baseline. Verify the recording's reuse terms separately from its transcript or a website footer, and retain the original licence notice and selected segment. Multi-speaker interviews belong to a later evaluation.
+
+The [Audrey Tang Seoul speech input example](../docs/audio-experiments.md#単独講演の入力例) was acquired and converted to validated 16 kHz mono PCM16 WAV in ignored storage. Its exact decoded duration is 325.567 seconds. The publication notice says CC0 while YouTube metadata says CC BY; both are preserved in local provenance. Publisher-provided English/Japanese subtitles are comparison material, not application recognition/translation. Input preparation itself did not run ASR or cloud generation or establish single-speaker verification by a complete listening pass.
+
+A subsequent explicitly authorized real-time replay completed fresh local recognition in 22 chunks, producing 62 lines, 15 marked uncertain. Recognition compute time totaled 44.439 seconds, including a 25.702-second first chunk; the complete replay process took 327.249 seconds. These are one-machine observations, not a recognition-quality score or microphone-to-screen benchmark. Both cloud workloads failed with HTTP 429 `insufficient_quota`, so no Japanese translation or understanding result was produced. The usage-confirmed API amount was zero; the final API amount remained unknown, with USD 0.178775 retained as unconfirmed reservations rather than reported as an actual charge. The saved recognition and failed work remain available in ignored storage.
+
+After the user reported adding API credit, the same 325.567-second audio was replayed again with fresh local ASR, 15-second chunks, 60-second translation and 120-second analysis intervals. This run completed in 350.989 seconds: 22 recognition chunks, 62 lines, 12 translation blocks from 6 requests, and 4 understanding results from 4 requests. All 47 eligible source lines were translated exactly once; the 15 uncertain lines remained excluded, so completion is not full spoken-content translation or a quality score. ASR compute time in this second invocation totaled 22.275 seconds and incurred no API charge. Usage-confirmed cloud expense was USD 0.044712 for translation plus USD 0.0665965 for understanding, totaling USD 0.1113085. The successful run had no unresolved reservations or application-cache hits. The earlier failed run's USD 0.178775 reservation remains separate and is not an actual charge. Development-assistant usage and electricity were not measured. A read-only viewer displays the actual saved recognition and generated results. It initially displayed the successful run's fee separately from older failures; later reading-focus feedback moved costs out of the screen into the accompanying sample record.
+
+The user subsequently authorized a [repository text sample](../samples/audrey-plurality-seoul-2023/README.md) while explicitly excluding the audio. Exported recognized lines, translation blocks, four understanding versions and aggregate measurements using a field allowlist; the sample preserves the uncorrected generated wording, source IDs and uncertainty. Its README and provenance identify Audrey Tang, Code for Japan, the exact original video and its CC BY notice. The saved YouTube license field has no version number; the current help page's CC BY 4.0 link is a reference, not proof of a version in the older video notice. Audio, publisher subtitles, raw API exchanges, runtime files, credentials, local paths and screenshots remain excluded. [Acquisition instructions](../docs/audio-experiments.md#単独講演の入力例) allow readers to obtain their own input. This is a narrow explicit publication exception, not permission to distribute other session data.
+
+## Observe arrival timing with the original audio
+
+The next review request was to observe the run from its beginning at real-time pace. A final-state screen cannot show the attention burden of waiting for recognition, translation and understanding updates. Extend the existing read-only replay to start at zero and 1×, optionally using the original local WAV, and reveal each saved result at its recorded publication time. Keep the playback controls compact, consistent with the removal of routine metadata from the reading screen.
+
+Audio time drives the displayed timeline during playback. Pause and seek keep the two together; restarting clears later output from the visible history. The timeline includes results published after audio ends rather than declaring the run finished at the last sample. Missing or contradictory publication records must not be replaced with guessed success times. This reuses saved text and does not authorize or perform new ASR, model generation, retries or budget-ledger changes. Browser playback latency and current acoustic conditions are separate from the recorded processing intervals. See the [playback instructions](../docs/audio-experiments.md#保存結果を冒頭から実時間で観察する).
+
+Validate countdowns with the real renderer during playback, including changes in the rendered pie angle, pause, seek and reading hold. A controller test with a mocked renderer does not establish that the visible circle changes. Distinguish a stopped playback clock from a busy processing state: only confirmed waiting intervals have a decreasing pie; recognition, generation and shared-slot waiting have no completion estimate.
+
+## Repeated uncertain source text
+
+The user observed several original-speech rows arriving together and repeated uncertain text occupying the reading pane. Recognition works on completed audio chunks (15 seconds by default), maps Whisper segments to individual source lines and publishes all lines from one chunk together. The saved-result replay retains that availability boundary. Several rows at once therefore do not mean several independent recognition requests finished simultaneously.
+
+Collapse consecutive uncertain lines with matching language and case/whitespace-normalized text into one visible row. Keep punctuation and different text distinct, and stop grouping at an intervening line. Retain the first line's wording and all member source IDs without adding counts or explanatory badges. The latest highlight belongs to the group containing the latest line. Source records and uncertainty must remain intact; this does not correct recognition or make excluded text eligible for translation. Reading hold and rewind operate before display grouping, so a group cannot reveal future lines. Verification should cover real renderer behavior, stable focus/scroll and retained raw data as well as the actual repeated passage.

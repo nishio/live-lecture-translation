@@ -171,7 +171,9 @@
         "section_end_to_source_publication_seconds_median": 0.833,
         "section_end_to_source_publication_seconds_p95": 0.918,
         "section_end_to_source_publication_seconds_maximum": 3.782,
-        "source_publications_during_one_cloud_request_over_30_seconds": 4
+        "cloud_requests_over_30_seconds": 2,
+        "source_publications_per_cloud_request_over_30_seconds": [2, 2],
+        "source_publications_during_cloud_requests_over_30_seconds_total": 4
       },
       "limits": [
         "This is an earlier separate trial, not the continuous-translation saved-ASR replay.",

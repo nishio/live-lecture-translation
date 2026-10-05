@@ -49,4 +49,6 @@ recognition-during-cloud-generation,all,measured,source_lines,64,lines,
 recognition-during-cloud-generation,local,measured,section_end_to_source_publication_median,0.833,seconds,22
 recognition-during-cloud-generation,local,measured,section_end_to_source_publication_p95,0.918,seconds,22
 recognition-during-cloud-generation,local,measured,section_end_to_source_publication_maximum,3.782,seconds,22
-recognition-during-cloud-generation,all,measured,publications_during_one_cloud_request_over_30_seconds,4,publications,
+recognition-during-cloud-generation,all,measured,cloud_requests_over_30_seconds,2,requests,
+recognition-during-cloud-generation,all,measured,publications_per_cloud_request_over_30_seconds,2,publications,2
+recognition-during-cloud-generation,all,measured,publications_during_cloud_requests_over_30_seconds_total,4,publications,2

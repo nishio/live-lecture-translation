@@ -16,6 +16,8 @@ The audit ran against an earlier application checkout, before the continuous-tra
 | Failed recognition chunks | 0 |
 | Additional API cost | USD 0 |
 
+The 90-second input was saved audio supplied at accelerated pace and recognized by the local model during the audit. It was not a fresh microphone recording, a 90-second wall-clock endurance test, or a new cloud-translation trial. The prepared API smoke test did not execute, so this audit adds no new API-authentication or generation-success evidence.
+
 The saved result reported capture and recognition complete, storage integrity verified, and semantic quality unverified. These counts describe the historical configuration; they must not be substituted for the standalone release's own test count. The underlying source speech remains private.
 
 ## Partial live cost observation

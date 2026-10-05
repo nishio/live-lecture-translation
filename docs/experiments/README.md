@@ -36,6 +36,8 @@ One fixed 330-second input was divided into 22 consecutive 15-second sections. E
 
 Local and online file recognition processed sections independently. Streaming retained a connection, sent 100 ms audio packets, and committed every 15 seconds. This compares whole methods with different context behavior, rather than controlling every factor except the model.
 
+The streaming path converted 16 kHz PCM to 24 kHz with a causal 61-tap FIR, with 0.625 ms group delay, reset at each 15-second boundary and with the delayed tail truncated. These preprocessing and boundary conditions also belong to the comparison; packet pacing alone would not prevent look-ahead from a noncausal resampler.
+
 | Method | Section end to final text: median / p95 | First section finalization | Confirmed API cost |
 | --- | ---: | ---: | ---: |
 | Local MLX Whisper | 0.827 / 0.901 s | 11.168 s | USD 0 |
@@ -46,9 +48,13 @@ The p95 calculation used nearest rank across all 22 sections, including the firs
 
 Final text differed between methods, including differences that affected meaning. Without a human reference transcript or listening-based ground truth, neither model agreement nor a qualitative disagreement review can establish word error rate or a general accuracy ranking. These observations did not support replacing the local recognizer solely on the basis of faster partial text.
 
+A follow-up quality review should separate punctuation, number spelling, fillers, and words moving across adjacent section boundaries from meaning changes. Read neighboring sections before classifying an apparent omission, and check quantities, negation, and names against publishable reference audio rather than fluency alone.
+
 Usage-confirmed ASR cost was USD 0.11825. An earlier streaming connection stopped before audio append or commit when a requested configuration field was absent from the response. It returned no usage, so USD 0.187 remained an unresolved reservation. Confirmed expense plus that reservation was USD 0.30525. A missing configuration echo means the effective value was unconfirmed; it does not prove that the requested value was used.
 
 The historical six-hour ASR-only extrapolations were USD 1.62 for file recognition and USD 6.12 for streaming. Translation, retries, and development work are excluded. These were not six-hour runs. Online recognition was a separate comparison experiment, not the normal microphone application's audio-transmission behavior.
+
+A supplementary comparison using the same translator and prompt on the first 90 seconds of each recognition result was prepared but did not execute. It therefore provides no matched translation-quality or generation-time result. Even a completed isolated translation request would not measure live speech-to-Japanese-display latency. Consolidating these notes does not resume that unexecuted trial.
 
 ## Accelerated capture storage
 
@@ -69,7 +75,7 @@ The test establishes these integrity properties under accelerated synthetic load
 
 ## Recognition during cloud generation
 
-An earlier 330-second real-time replay exercised local recognition alongside a separate cloud worker. It produced 22 sections and 64 source lines. During a cloud analysis lasting more than 30 seconds, four recognition publications occurred.
+An earlier 330-second real-time replay exercised local recognition alongside a separate cloud worker. It produced 22 sections and 64 source lines. During two cloud analyses lasting more than 30 seconds (33.91 and 33.75 seconds), two recognition publications occurred in each, for four publications in total.
 
 Section completion to source publication measured median 0.833 seconds, p95 0.918 seconds, and maximum 3.782 seconds. The 15-second section wait and browser rendering were separate. This supports the claim that cloud generation need not block source publication. It is a different experiment from the continuous-translation trial that reused saved recognition, and their timing figures must not be merged.
 
