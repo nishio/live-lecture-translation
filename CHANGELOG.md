@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Classify cloud failures and add up to three automatic retries within a five-minute start window for recoverable failures in continuous mode. Respect server retry delays, permit pausing, preserve frozen request input and every unresolved reservation, and keep other stages independent.
+
 - Prefer sentence-like source-row endings in every continuous translation block and retain unfinished tails with a distinct continuation-wait state. Preserve explicit reasons for fragments forced by limits, source gaps, processed-audio timeout or final drain; boundary waits consume no generation interval and retries retain frozen inputs. This first stage keeps whole-row coverage and does not integrate provisional ASR or revise published translations.
 - Add an explicit offline ASR probe comparing 2–30-second chunks and revisable rolling windows, with separate warmup, processing measurements, estimated publication timing, and retained incomplete work. Record the authorized public-audio comparison without changing live defaults.
 

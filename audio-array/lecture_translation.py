@@ -551,8 +551,9 @@ def translate_batch(plan, *, provider, model, out_dir, timeout=60, retry_failed=
     """Generate once; coverage is returned only after full validation and saving.
 
     OpenAI-only first version. The caller must authorize the transcript scope and
-    configure the shared ledger before calling. retry_failed=True is exclusively
-    for explicit manual retries; neither this module nor the adapter auto-retries.
+    configure the shared ledger before calling. retry_failed=True is for manual
+    or bounded coordinator-admitted retries; neither this module nor the adapter
+    loops or silently retries a request.
     """
     if provider != "openai":
         raise TranslationInputError("continuous block translation currently supports only provider='openai'")

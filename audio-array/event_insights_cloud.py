@@ -2,19 +2,23 @@
 
 The ledger stores hashes and token/cost counts, never credentials or source text.
 Validated responses are cached under gitignored data/event-audio/dashboard.
-Reservations survive crashes, timeouts and failed validation. No automatic retry.
+Reservations survive crashes, timeouts and failed validation. Each call makes
+one attempt; the application may authorize a bounded retry as a separate call.
 """
 from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import shlex
 import tempfile
+import time
 from urllib import error, request
 from zoneinfo import ZoneInfo
 
@@ -44,11 +48,78 @@ MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
 class CloudError(RuntimeError):
-    pass
+    """Public diagnostics contain only fixed categories and allowlisted codes."""
+    def __init__(self, message, *, category='unknown', retryable=False, http_status=None,
+                 provider_code=None, retry_after_seconds=None):
+        super().__init__(message)
+        self.category = category
+        self.retryable = retryable
+        self.http_status = http_status
+        self.provider_code = provider_code
+        self.retry_after_seconds = retry_after_seconds
+
+    def diagnostics(self):
+        return {'category': self.category, 'retryable': self.retryable,
+                'http_status': self.http_status, 'provider_code': self.provider_code,
+                'retry_after_seconds': self.retry_after_seconds}
 
 
 class BudgetExceededError(CloudError):
-    pass
+    def __init__(self, message):
+        super().__init__(message, category='budget')
+
+
+def _retry_after(headers):
+    value = headers.get('Retry-After') if headers else None
+    if not isinstance(value, str) or len(value) > 128:
+        return None
+    try:
+        delay = float(value)
+        return delay if math.isfinite(delay) and delay >= 0 else None
+    except ValueError:
+        try:
+            date = parsedate_to_datetime(value)
+            if date.tzinfo is None:
+                return None
+            delay = date.timestamp() - time.time()
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return max(0.0, delay) if math.isfinite(delay) else None
+
+
+def _http_error(exc):
+    # Error bodies may contain source text or credentials. Retain only known
+    # machine codes, never the message, arbitrary type, headers, or request ID.
+    known = {'rate_limit_exceeded', 'insufficient_quota', 'billing_hard_limit_reached',
+             'billing_not_active', 'usage_limit_reached', 'invalid_api_key',
+             'invalid_request_error', 'server_error'}
+    codes = set()
+    try:
+        raw = exc.read(16385)
+        body = json.loads(raw) if len(raw) <= 16384 else None
+        detail = body.get('error') if isinstance(body, dict) else None
+        if isinstance(detail, dict):
+            codes = {value for value in (detail.get('code'), detail.get('type'))
+                     if isinstance(value, str) and value in known}
+    except (OSError, ValueError, TypeError):
+        pass
+    finally:
+        exc.close()
+    quota = codes & {'insufficient_quota', 'billing_hard_limit_reached', 'billing_not_active', 'usage_limit_reached'}
+    status = exc.code
+    if quota:
+        category, retryable, code = 'quota', False, sorted(quota)[0]
+    elif status in (401, 403) or 'invalid_api_key' in codes:
+        category, retryable, code = 'authentication', False, 'invalid_api_key' if 'invalid_api_key' in codes else None
+    elif status == 429:
+        category, retryable, code = ('rate_limit', True, 'rate_limit_exceeded') if 'rate_limit_exceeded' in codes else ('unknown', False, None)
+    elif status == 408 or 500 <= status < 600:
+        category, retryable, code = 'server', True, 'server_error' if 'server_error' in codes else None
+    else:
+        category, retryable, code = 'invalid_request', False, 'invalid_request_error' if 'invalid_request_error' in codes else None
+    return CloudError(f'OpenAI APIがHTTP {status}を返しました。', category=category,
+        retryable=retryable, http_status=status, provider_code=code,
+        retry_after_seconds=_retry_after(exc.headers))
 
 
 def _api_key():
@@ -245,41 +316,41 @@ def _post(payload, key, timeout):
         with opener.open(req, timeout=timeout) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except error.HTTPError as exc:
-        # Do not expose upstream error bodies or request headers.
-        raise CloudError(f"OpenAI APIがHTTP {exc.code}を返しました。自動再試行はしません。") from exc
+        raise _http_error(exc) from None
     except (error.URLError, TimeoutError, OSError) as exc:
-        raise CloudError("OpenAI APIの通信が失敗またはタイムアウトしました。予約額は保持されます。") from exc
+        raise CloudError("OpenAI APIの通信が失敗またはタイムアウトしました。予約額は保持されます。",
+                         category='transport', retryable=True) from None
     if len(raw) > MAX_RESPONSE_BYTES:
-        raise CloudError("OpenAI APIの応答がサイズ上限を超えました。")
+        raise CloudError("OpenAI APIの応答がサイズ上限を超えました。", category='invalid_response')
     try:
         return json.loads(raw)
     except (ValueError, UnicodeError) as exc:
-        raise CloudError("OpenAI APIの応答が不正なJSONです。") from exc
+        raise CloudError("OpenAI APIの応答が不正なJSONです。", category='invalid_response') from None
 
 
 def _output_text(response):
     if not isinstance(response, dict) or response.get("status") != "completed" or response.get("error"):
-        raise CloudError("OpenAI APIの応答が完了しませんでした。")
+        raise CloudError("OpenAI APIの応答が完了しませんでした。", category='invalid_response')
     output = response.get("output")
     if not isinstance(output, list):
-        raise CloudError("OpenAI APIの出力形式が不正です。")
+        raise CloudError("OpenAI APIの出力形式が不正です。", category='invalid_response')
     parts = []
     for item in output:
         if not isinstance(item, dict):
-            raise CloudError("OpenAI APIの出力形式が不正です。")
+            raise CloudError("OpenAI APIの出力形式が不正です。", category='invalid_response')
         if item.get("type") == "reasoning":
             continue
         if item.get("type") != "message" or item.get("status") != "completed":
-            raise CloudError("OpenAI APIが予期しない出力を返しました。")
+            raise CloudError("OpenAI APIが予期しない出力を返しました。", category='invalid_response')
         content = item.get("content")
         if not isinstance(content, list):
-            raise CloudError("OpenAI APIの出力形式が不正です。")
+            raise CloudError("OpenAI APIの出力形式が不正です。", category='invalid_response')
         for part in content:
             if not isinstance(part, dict) or part.get("type") != "output_text" or not isinstance(part.get("text"), str):
-                raise CloudError("OpenAI APIが要約を返しませんでした。")
+                raise CloudError("OpenAI APIが要約を返しませんでした。", category='invalid_response')
             parts.append(part["text"])
     if not parts:
-        raise CloudError("OpenAI APIの応答が空です。")
+        raise CloudError("OpenAI APIの応答が空です。", category='invalid_response')
     return "".join(parts)
 
 
@@ -350,7 +421,7 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
     model = payload["model"]
     key = _api_key()
     if not key:
-        raise CloudError("OPENAI_API_KEYが未設定です。")
+        raise CloudError("OPENAI_API_KEYが未設定です。", category='configuration')
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     fingerprint = hashlib.sha256(encoded).hexdigest()
     identity = fingerprint
@@ -370,7 +441,7 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
                 return {**cached, "result": checked, "cache_hit": True, **budget_status()}
             if not retry_failed:
                 raise CloudError("同じ入力は処理中または前回失敗済みです。自動では再送しません。失敗後は手動で再試行できます。")
-            # Explicit user retry reserves another complete attempt. The previous
+            # An explicitly admitted retry reserves another complete attempt. The previous
             # failed/unknown request remains charged; never refund it to retry.
             identity = hashlib.sha256(f"{fingerprint}:{len(previous)}".encode()).hexdigest()
         day = _day()
@@ -389,7 +460,7 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
         returned_model = response.get("model", "") if isinstance(response, dict) else ""
         if (not isinstance(returned_model, str) or not returned_model.startswith(model)
                 or response.get("service_tier") not in (None, "default")):
-            raise CloudError("APIが指定外のモデルまたは料金tierを返しました。予約額は保持されます。")
+            raise CloudError("APIが指定外のモデルまたは料金tierを返しました。予約額は保持されます。", category='invalid_response')
         text = _output_text(response)
         result = validate(text)
         actual, usage = _actual_cost(response, model)
@@ -407,11 +478,12 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
                 charged_nanodollars=charged, usage=usage)
             _atomic_json(STATE_DIR / "cloud-budget.json", ledger)
         return {**cached, **budget_status()}
-    except Exception:
+    except Exception as exc:
         # Preserve the reservation even if we do not know whether the call ran.
         with _locked_ledger() as ledger:
             entry = ledger["requests"][identity]
             entry["state"] = "failed"
+            entry['error'] = exc.diagnostics() if isinstance(exc, CloudError) else {'category': 'invalid_response', 'retryable': False}
             entry["charged_nanodollars"] = max(entry["charged_nanodollars"], entry["reserved_nanodollars"])
             _atomic_json(STATE_DIR / "cloud-budget.json", ledger)
         raise

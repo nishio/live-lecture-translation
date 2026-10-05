@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -6,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError, URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import event_insights_cloud as cloud
@@ -28,6 +30,68 @@ def response(usage=True, model=None):
 
 
 class CloudInsightsTest(unittest.TestCase):
+    def test_http_failures_have_sanitized_retry_diagnostics(self):
+        cases = [(429, 'rate_limit_exceeded', 'rate_limit', True),
+                 (429, 'insufficient_quota', 'quota', False),
+                 (429, 'unknown_private_code', 'unknown', False),
+                 (401, 'invalid_api_key', 'authentication', False),
+                 (400, 'invalid_request_error', 'invalid_request', False),
+                 (503, 'server_error', 'server', True), (408, None, 'server', True)]
+        for status, code, category, retryable in cases:
+            with self.subTest(status=status, code=code):
+                body = json.dumps({'error': {'code': code, 'message': 'PRIVATE TEXT secret-token',
+                                             'type': 'PRIVATE TYPE'}}).encode()
+                upstream = HTTPError(cloud.API_URL, status, 'PRIVATE TEXT',
+                                     {'Retry-After': '12', 'x-request-id': 'PRIVATE ID'}, io.BytesIO(body))
+                with patch.object(cloud.request, 'build_opener') as opener:
+                    opener.return_value.open.side_effect = upstream
+                    with self.assertRaises(cloud.CloudError) as caught:
+                        cloud._post({}, 'synthetic-key', 1)
+                diagnostic = caught.exception.diagnostics()
+                self.assertEqual((category, retryable, status, 12),
+                    (diagnostic['category'], diagnostic['retryable'], diagnostic['http_status'], diagnostic['retry_after_seconds']))
+                self.assertNotIn('PRIVATE', str(caught.exception) + json.dumps(diagnostic))
+                self.assertNotIn('unknown_private_code', json.dumps(diagnostic))
+
+    def test_quota_wins_over_rate_limit_type_and_retry_after_is_bounded_input(self):
+        body = json.dumps({'error': {'code': 'insufficient_quota', 'type': 'rate_limit_exceeded'}}).encode()
+        exc = cloud._http_error(HTTPError(cloud.API_URL, 429, '', {}, io.BytesIO(body)))
+        self.assertEqual('quota', exc.category)
+        self.assertFalse(exc.retryable)
+        with patch.object(cloud.time, 'time', return_value=0):
+            self.assertEqual(120, cloud._retry_after({'Retry-After': 'Thu, 01 Jan 1970 00:02:00 GMT'}))
+        for value in ('NaN', 'inf', '-1', 'PRIVATE', '1' * 200):
+            self.assertIsNone(cloud._retry_after({'Retry-After': value}))
+        for raw in (b'not JSON PRIVATE', b'x' * 20000):
+            exc = cloud._http_error(HTTPError(cloud.API_URL, 503, '', {}, io.BytesIO(raw)))
+            self.assertTrue(exc.retryable)
+            self.assertNotIn('PRIVATE', str(exc))
+
+    def test_transport_error_never_leaks_details_or_retries_in_adapter(self):
+        with patch.object(cloud.request, 'build_opener') as opener:
+            opener.return_value.open.side_effect = URLError('PRIVATE secret-url')
+            with self.assertRaises(cloud.CloudError) as caught:
+                cloud._post({}, 'synthetic-key', 1)
+            opener.return_value.open.assert_called_once()
+        self.assertTrue(caught.exception.retryable)
+        self.assertEqual('transport', caught.exception.category)
+        self.assertNotIn('PRIVATE', str(caught.exception))
+
+    def test_failed_ledger_keeps_sanitized_diagnostics_and_reserves_retry(self):
+        failure = cloud.CloudError('通信失敗', category='transport', retryable=True)
+        with patch.object(cloud, '_post', side_effect=failure):
+            with self.assertRaises(cloud.CloudError):
+                self.generate()
+        first = next(iter(cloud._load_ledger()['requests'].values()))
+        self.assertEqual(failure.diagnostics(), first['error'])
+        held = first['charged_nanodollars']
+        with patch.object(cloud, '_post', return_value=response()):
+            self.generate(retry_failed=True)
+        entries = list(cloud._load_ledger()['requests'].values())
+        self.assertEqual(['failed', 'completed'], [item['state'] for item in entries])
+        self.assertEqual(held, entries[0]['charged_nanodollars'])
+        self.assertGreater(entries[1]['charged_nanodollars'], 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -493,8 +493,8 @@ def analyze_snapshot(lines, previous=None, *, provider="local", model=None,
     API keys and environment-based auto-selection cannot activate it implicitly.
     Local timeouts may leave Ollama server work alive, as in the existing adapter;
     callers must inspect the server before starting more local inference.
-    ``retry_failed=True`` is only for an explicit user retry; the cloud adapter
-    retains the previous reservation and must reserve the new attempt's budget.
+    ``retry_failed=True`` is for a manual or bounded coordinator-admitted retry;
+    the cloud adapter retains the previous reservation and reserves a new budget.
     """
     if provider not in ("local", "ollama", "ollama-local", "openai"):
         raise SnapshotInputError("provider must be local or openai")
