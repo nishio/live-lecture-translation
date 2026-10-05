@@ -14,6 +14,8 @@ The native helper is tied to its source through a build identity. Capture verifi
 
 Recognition publishes independently of the cloud worker. A request already generating a translation or analysis must not hold back newly recognized text. Recognition chunks introduce their own waiting time before any inference begins.
 
+The separate [chunk-duration and provisional-buffer experiment](experiments/asr-chunk-duration.md) compares fresh recognition at different lengths and rolling snapshots. It selects a 3-second refresh with a trailing 15-second revisable buffer as a future implementation candidate. The current live source path is still append-only with a default 15-second chunk; provisional display, stable-prefix reconciliation, and translation-time re-recognition are not integrated.
+
 Raw recognized speech remains the evidence layer. A future correction system should preserve the original recognition, the proposed correction, and the evidence for accepting it. A plausible name is not an adequate substitute for missing evidence.
 
 ## Translation tracks unfinished work

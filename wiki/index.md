@@ -2,6 +2,7 @@
 
 This wiki preserves reusable engineering decisions for `live-lecture-translation`. Markdown is the editing authority. Keep source audio, recognized speech, generated lecture content, keys, and machine-specific private data outside the wiki.
 
+- [Provisional live recognition](provisional-asr.md) and [measured ASR chunk comparison](../docs/experiments/asr-chunk-duration.md): fresh recognition of one public lecture at 3/5/10/15/30 seconds, a 3-second refresh of the latest 15 seconds, measured processing versus estimated waiting, observed revisions and limits; selects a provisional-buffer implementation candidate while preserving the current runtime.
 - [Engineering decisions](engineering-decisions.md): the purpose of supporting understanding with limited attention, canonical development ownership, runtime continuity, independent evidence capture, persistent unfinished work, honest timing and quality claims, and session cost attribution without double counting.
 - [Collected migration follow-ups](migration-follow-ups.md): unapplied source patches, streaming integration lessons, v0.9 proper-name examples, user-supplied audio experiments and cost visibility, reference/history usability, the 論点/主張 design question, and additional historical measurements.
 - [Architecture](../docs/architecture.md): current components and lifecycle.

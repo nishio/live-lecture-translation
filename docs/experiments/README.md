@@ -1,5 +1,7 @@
 # Historical experiment summaries
 
+For a newly executed comparison in this repository, see the [2026-10-05 ASR chunk-duration and provisional-buffer experiment](asr-chunk-duration.md). It contains fresh local recognition measurements and explicitly estimated waiting times. The records below remain historical.
+
 These records summarize development measurements made before the standalone 0.9 extraction. They contain aggregate numbers and methodology only. Source recordings, recognized speech, translations, API payloads and responses, semantic-review excerpts, screenshots, authenticated URLs, and machine-specific paths are excluded.
 
 The measurements have not been rerun as part of writing this documentation. They describe their recorded implementations and conditions; they are not a fresh clean-install certification for this repository. The private source material is not available here, so readers cannot independently reproduce content-dependent quality judgments from this release.

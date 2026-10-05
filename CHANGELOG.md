@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add an explicit offline ASR probe comparing 2–30-second chunks and revisable rolling windows, with separate warmup, processing measurements, estimated publication timing, and retained incomplete work. Record the authorized public-audio comparison without changing live defaults.
+
 ## 0.9
 
 Initial standalone extraction of the continuous lecture translation application.

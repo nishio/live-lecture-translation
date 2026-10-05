@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-05",
+  "timezone": "Asia/Tokyo",
+  "record_type": "new_local_asr_experiment",
+  "input": {
+    "sample": "audrey-plurality-seoul-2023",
+    "source_url": "https://www.youtube.com/watch?v=4_tge6XJhGA",
+    "sha256": "da7a7c8202a28b24e3a24a0bcfd7f4da0a786c30884975101d60a876c34301f3",
+    "duration_seconds": 325.567,
+    "frames": 5209072
+  },
+  "environment": {
+    "cpu": "Apple M1 Pro",
+    "memory_bytes": 34359738368,
+    "macos": "15.1.1",
+    "python": "3.12.8",
+    "mlx": "0.32.2",
+    "mlx_whisper": "0.4.3",
+    "numpy": "2.5.3"
+  },
+  "model": {
+    "repo": "mlx-community/whisper-large-v3-turbo",
+    "revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+  },
+  "decode": {
+    "language": "en",
+    "temperature": 0,
+    "condition_on_previous_text": false,
+    "initial_prompt": null
+  },
+  "warmup_call_wall_seconds": {
+    "fixed_experiment": 10.124015709006926,
+    "rolling_experiment": 3.7357547499996144
+  },
+  "service_definition": "Call wall time minus observed inference-lock waiting; includes per-chunk WAV creation, reading, recognition and result saving.",
+  "schedule_definition": "Offline single-worker causal simulation; averages uniformly over newly available audio including silence. Excludes warmup, external lock waiting, live coordinator, capture and browser rendering. Not per-word successful recognition latency.",
+  "caption_metric": {
+    "caption_tokens": 639,
+    "caption_cues": 43,
+    "normalization": "HTML unescape; lowercase; curly apostrophes to straight; regex [a-z0-9]+(?:'[a-z0-9]+)*. Numbers/names are not corrected.",
+    "definition": "caption_disagreement_pct = 100 * token Levenshtein distance / caption token count. Captions contain errors; this is NOT WER or recognition accuracy."
+  },
+  "conditions": [
+    {
+      "kind": "independent_chunks",
+      "step_seconds": 3,
+      "window_seconds": 3,
+      "runs": 2,
+      "calls_per_run": [
+        109,
+        109
+      ],
+      "measured_service_seconds_median": 0.6542292914964492,
+      "measured_service_seconds_p95": 0.6829044999612961,
+      "measured_service_seconds_max": 0.7741252919950057,
+      "measured_total_service_seconds_per_run": [
+        71.4060252525669,
+        71.76862045479356
+      ],
+      "observed_lock_wait_seconds_per_run": [
+        0.35680141716147773,
+        0.3505327940220013
+      ],
+      "estimated_mean_audio_wait_seconds_per_run": [
+        2.1517452975816087,
+        2.155027703158349
+      ],
+      "estimated_max_backlog_seconds_per_run": [
+        0.0,
+        0.0
+      ],
+      "caption_token_edit_distance": 69,
+      "caption_disagreement_percent": 10.7981220657277,
+      "uncertain_token_percent": 11.580594679186229,
+      "line_count": 122,
+      "uncertain_line_count": 13,
+      "doubt_reasons": {
+        "timestamp_outside_audio": 13
+      },
+      "identical_normalized_transcript_across_repeats": true
+    },
+    {
+      "kind": "independent_chunks",
+      "step_seconds": 5,
+      "window_seconds": 5,
+      "runs": 2,
+      "calls_per_run": [
+        66,
+        66
+      ],
+      "measured_service_seconds_median": 0.6729426460078685,
+      "measured_service_seconds_p95": 0.6964239999942947,
+      "measured_service_seconds_max": 0.7239373340271413,
+      "measured_total_service_seconds_per_run": [
+        44.32994641191908,
+        44.53320929093752
+      ],
+      "observed_lock_wait_seconds_per_run": [
+        0.2070686711522285,
+        0.29016304400283843
+      ],
+      "estimated_mean_audio_wait_seconds_per_run": [
+        3.168620202351218,
+        3.171628291425785
+      ],
+      "estimated_max_backlog_seconds_per_run": [
+        0.10627508301240596,
+        0.1250629589876553
+      ],
+      "caption_token_edit_distance": 67,
+      "caption_disagreement_percent": 10.485133020344287,
+      "uncertain_token_percent": 7.384615384615385,
+      "line_count": 81,
+      "uncertain_line_count": 6,
+      "doubt_reasons": {
+        "timestamp_outside_audio": 6,
+        "common_hallucination": 1
+      },
+      "identical_normalized_transcript_across_repeats": true
+    },
+    {
+      "kind": "independent_chunks",
+      "step_seconds": 10,
+      "window_seconds": 10,
+      "runs": 2,
+      "calls_per_run": [
+        33,
+        33
+      ],
+      "measured_service_seconds_median": 0.7252049169765087,
+      "measured_service_seconds_p95": 0.7698025419958867,
+      "measured_service_seconds_max": 0.8238392910279799,
+      "measured_total_service_seconds_per_run": [
+        24.070180378999794,
+        23.840377796033863
+      ],
+      "observed_lock_wait_seconds_per_run": [
+        0.11142770605511032,
+        0.11197253491263837
+      ],
+      "estimated_mean_audio_wait_seconds_per_run": [
+        5.691924621754806,
+        5.685030768018998
+      ],
+      "estimated_max_backlog_seconds_per_run": [
+        0.0,
+        0.0
+      ],
+      "caption_token_edit_distance": 50,
+      "caption_disagreement_percent": 7.82472613458529,
+      "uncertain_token_percent": 3.5313001605136436,
+      "line_count": 70,
+      "uncertain_line_count": 4,
+      "doubt_reasons": {
+        "timestamp_outside_audio": 4
+      },
+      "identical_normalized_transcript_across_repeats": true
+    },
+    {
+      "kind": "independent_chunks",
+      "step_seconds": 15,
+      "window_seconds": 15,
+      "runs": 2,
+      "calls_per_run": [
+        22,
+        22
+      ],
+      "measured_service_seconds_median": 0.771248666496831,
+      "measured_service_seconds_p95": 1.0499546660284977,
+      "measured_service_seconds_max": 1.3960535419755615,
+      "measured_total_service_seconds_per_run": [
+        17.78979382995749,
+        17.891902461939026
+      ],
+      "observed_lock_wait_seconds_per_run": [
+        0.08645720800268464,
+        0.07884766699862666
+      ],
+      "estimated_mean_audio_wait_seconds_per_run": [
+        8.238115201053043,
+        8.242369924984285
+      ],
+      "estimated_max_backlog_seconds_per_run": [
+        0.0,
+        0.0
+      ],
+      "caption_token_edit_distance": 94,
+      "caption_disagreement_percent": 14.710485133020343,
+      "uncertain_token_percent": 23.503649635036496,
+      "line_count": 62,
+      "uncertain_line_count": 15,
+      "doubt_reasons": {
+        "timestamp_outside_audio": 11,
+        "repetition": 10
+      },
+      "identical_normalized_transcript_across_repeats": true
+    },
+    {
+      "kind": "independent_chunks",
+      "step_seconds": 30,
+      "window_seconds": 30,
+      "runs": 2,
+      "calls_per_run": [
+        11,
+        11
+      ],
+      "measured_service_seconds_median": 1.5225454789906507,
+      "measured_service_seconds_p95": 1.5639876660425216,
+      "measured_service_seconds_max": 1.5838967499730643,
+      "measured_total_service_seconds_per_run": [
+        16.099807833932573,
+        16.172086919134017
+      ],
+      "observed_lock_wait_seconds_per_run": [
+        0.026238916005240753,
+        0.06775308190844953
+      ],
+      "estimated_mean_audio_wait_seconds_per_run": [
+        16.29768973127224,
+        16.303936345230177
+      ],
+      "estimated_max_backlog_seconds_per_run": [
+        0.0,
+        0.0
+      ],
+      "caption_token_edit_distance": 34,
+      "caption_disagreement_percent": 5.320813771517997,
+      "uncertain_token_percent": 0.47468354430379744,
+      "line_count": 54,
+      "uncertain_line_count": 2,
+      "doubt_reasons": {
+        "timestamp_outside_audio": 2
+      },
+      "identical_normalized_transcript_across_repeats": true
+    },
+    {
+      "kind": "provisional_rolling_snapshots",
+      "step_seconds": 3,
+      "window_seconds": 15,
+      "runs": 2,
+      "calls_per_run": [
+        109,
+        109
+      ],
+      "measured_service_seconds_median": 0.776711229031207,
+      "measured_service_seconds_p95": 0.8318457920104265,
+      "measured_service_seconds_max": 1.4231811669887975,
+      "measured_total_service_seconds_per_run": [
+        86.14531569785322,
+        86.34247211911133
+      ],
+      "observed_lock_wait_seconds_per_run": [
+        0.3844187092036009,
+        0.36190267105121166
+      ],
+      "estimated_mean_audio_wait_seconds_per_run": [
+        2.2869807846453685,
+        2.2887047338402358
+      ],
+      "estimated_max_backlog_seconds_per_run": [
+        0.0,
+        0.0
+      ],
+      "caption_disagreement_percent": null,
+      "quality_note": "Overlapping snapshots must not be concatenated as a final transcript. Selected revisions were reviewed separately.",
+      "identical_normalized_snapshots_across_repeats": true,
+      "matched_snapshot_pairs": 109
+    }
+  ],
+  "limits": [
+    "One prepared single-speaker recording; not general accuracy or optimality.",
+    "Captions have errors; no listened ground truth or human comprehension assessment.",
+    "Desktop load not isolated; CPU tests overlapped part of first fixed-length pass.",
+    "No stable-prefix reconciliation or translation-time re-recognition integrated into live app.",
+    "No cloud translation/analysis or new microphone capture."
+  ],
+  "cost": {
+    "additional_application_api_usd": 0,
+    "development_assistant_usage": "unmeasured",
+    "electricity": "unmeasured"
+  }
+}
