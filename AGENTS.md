@@ -6,6 +6,7 @@ This repository is the canonical home for future Mac lecture application code, e
 
 Development migration does not authorize a runtime cutover. Preserve a running session. Before retiring a stopped checkout, verify that no capture or processing is active, preserve its private files and shared dependencies, and record completed, failed, and pending stages explicitly. Preserving unfinished work does not mean it succeeded or authorize its replay. The v0.9.0 tag remains the baseline; later changes belong to later commits. See wiki/migration-follow-ups.md for collected work that has not been applied.
 
+- Before proposing, repeating or implementing a Codex subscription provider, read the [tested route and adoption decision](wiki/live-and-review-pipeline.md#subscription-provider-decision). The Sol/Luna route was already evaluated and is not the preferred live replacement. Do not rerun unchanged conditions as an untested idea; reconsider only with a concrete changed factor and latency/quality acceptance criteria.
 - v0.9.0 is the extracted baseline. Record later field feedback separately and implement it in subsequent versions.
 - Keep capture, ASR, translation, and analysis independently observable. A stop request is not proof of completion.
 - Never commit recordings, transcripts, translations, summaries, API payloads, response caches, credentials, token-bearing URLs, or screenshots of real sessions.

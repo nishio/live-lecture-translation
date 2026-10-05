@@ -59,10 +59,50 @@ Evaluate speaker diarization first for Q&A, interviews, panels, and other materi
 
 The official [file-transcription guide](https://developers.openai.com/api/docs/guides/speech-to-text), checked on 2026-10-05, documents speaker-labeled output via `gpt-4o-transcribe-diarize`. This is one possible evaluation backend, not an adopted dependency or a quality ranking. Compare attribution errors against leaving speakers unknown, including turn boundaries and overlapping speech. A single-speaker lecture does not automatically benefit from an extra labeling pass. Local processing and explicitly authorized cloud audio processing remain separate choices; existing text-only cloud permission does not authorize audio upload.
 
-## Subscription access as a provider candidate
+## Subscription provider decision
 
-The user reported approximately USD 10 in API spending and asked whether a subscription allowance could have been used. Preserve this as user-reported cost: the exact session scope, confirmed charges, and unresolved reservations were not reconciled here. Do not replace the published historical ledger-based observations with this figure or claim it would all have been avoided.
+**2026-10-05 decision: the tested Codex subscription route is not the preferred
+replacement for the current lecture pipeline. It has already been evaluated;
+do not restart the same trial merely because subscription access is available.**
+Keep the current live provider selection unchanged. This decision concerns the
+automated translation/analysis path, not asking an agent questions about saved
+transcripts or a blanket prohibition on Luna or subscription use.
 
-ChatGPT-authenticated Codex is a legitimate alternative to investigate for personal text-processing workflows; see [billing and access paths](../docs/cloud-configuration.md#api-billing-and-codex-subscription-access). The current application has no Codex provider. Begin with a resumable post-lecture text workflow, then evaluate live use separately if useful. This ordering is a design recommendation based on tolerance for pauses, not a benchmark proving that Codex is too slow for live work.
+An isolated worktree based on v0.9.0 processed the saved Audrey lecture text
+through ChatGPT-authenticated Codex. The
+[Sol/API comparison](https://github.com/nishio/live-lecture-translation/blob/6f4bfda1860ff3464cc79a44beb089a0b9b77f82/docs/experiments/audrey-subscription.md#retrospective-comparison-with-the-audrey-api-run)
+and [Luna evaluation](https://github.com/nishio/live-lecture-translation/blob/6f4bfda1860ff3464cc79a44beb089a0b9b77f82/docs/experiments/audrey-luna-subscription.md)
+are pinned to the published experiment commit `6f4bfda`. Its code remains on
+`experiment/codex-subscription`; it has not been integrated into main or the
+running application.
 
-A candidate adapter must validate structured output and stable source references, preserve failures and pending work, and handle cancellation, rate/usage limits, and authentication expiry. Give it only the intended source context; unrelated repository files, tools, or previous chats must not become lecture evidence. Compare end-to-end latency and quality on the same input. Keep API charges, subscription-allowance consumption, subscription fees, and unmeasured development/energy costs separate. Available models and sufficient allowance for a full event must be checked rather than assumed. No billing route or authentication has been changed.
+- With `gpt-6.1-sol` / low, five matching application translation requests had
+  API/Codex medians of 10.150/15.693 seconds (Codex 1.55× as long). The Codex path
+  also reported roughly 9,550 additional input tokens per matching request.
+  No tool-use loop occurred, and the contribution of startup/authentication,
+  extra instructions, provider and network variation was not separately timed.
+- `gpt-6-luna` / low returned faster, but one of six translations failed group
+  and target validation. Other outputs passed structural checks while omitting
+  meaning, moving text under incorrect source IDs, or adding unsupported
+  interpretation. The normal replay stopped; the remaining seven requests were
+  separate diagnostics, not a successfully resumed lecture run.
+- For the five translations accepted by both subscription models, Sol/Luna
+  medians were 11.943/8.525 seconds (28.6% shorter); analysis medians were
+  36.564/19.693 seconds (46.1% shorter). This is a different subset from the
+  Sol/API comparison. Speed did not establish equivalent semantic quality.
+
+These are single saved-ASR trials using v0.9.0-derived prompts and selection,
+not audio-ground-truth accuracy scores, current-main quality measurements,
+long-session capacity tests or speech-to-display latency. Subscription allowance
+percentage and fee allocation were not measured. The earlier user-reported
+approximately USD 10 API spend was not reconciled and is not a measured saving.
+Keep subscription usage separate from the application's USD ledger.
+
+Before reconsidering this route, read those results and state a concrete changed
+factor, the new hypothesis, and the latency/quality criteria that could overturn
+this decision. Examples are a different integration that reduces startup overhead
+or a revised source/prompt/schema contract addressing the known failures. Do not
+repeat unchanged conditions as if the idea were untested, and do not automatically
+switch providers or replay preserved failed work. Exact source-ID coverage alone
+does not establish faithful meaning-to-source attribution. New inference retains
+the repository's existing authorization requirements.

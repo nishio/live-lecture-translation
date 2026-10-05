@@ -265,3 +265,22 @@ Distilled the implementation into the existing [first-experiment decision](engin
 Updated the topic, then index, then this log. Markdown is this repository's explicit authority, so the file-back skill's direct-Markdown fallback was used without a store migration. Canonical architecture, setup, the English/Japanese READMEs and the own-audio walkthrough agree with the implementation. The user requested publication; selected only the completed audio-import and onboarding changes from the shared checkout. Concurrent uncertainty-policy code and documentation remain outside this publication candidate.
 
 The isolated candidate passed 429 CPU-only Python tests (427 passed, two opt-in native capture tests skipped) and both Node UI suites. The earlier 459-test result belongs to the broader development tree and is not the count for this publication. Selected-file Python syntax, setup shell syntax, 112 local Markdown links/anchors, private-file exclusions, added-content scans and whitespace checks passed. No real recording, model inference, application API request, runtime cutover or ledger change was performed. Additional application API cost was USD 0; development-assistant usage and electricity were unmeasured.
+
+## [2026-10-05] file back | Put the subscription adoption decision on main
+
+The user pointed out that an experiment-branch-only decision would allow main
+agents to rediscover and repeat the same idea. Replaced the stale subscription
+candidate/recommended-first-trial wording with the completed Sol/API and Luna
+findings, linked to the published experiment commit `6f4bfda`. The tested Codex
+route is not the preferred replacement for the current lecture pipeline; an
+unchanged Luna/low configuration is not recommended as an equivalent substitute.
+Reconsideration needs a concrete changed factor, new hypothesis and explicit
+latency/quality criteria, not an automatic replay of the same conditions.
+
+Added an AGENTS.md entry point and aligned cloud configuration, the migration
+follow-up queue, the Japanese retrospective, the wiki index and this log. The
+scope is the tested automated provider path, not a blanket ban on Luna,
+subscription access or manual questions about saved transcripts. Main contains
+the decision and evidence links; experimental runtime code remains on its branch.
+Only these documentation hunks were selected while preserving concurrent work.
+No application settings, running sessions, model inference or API requests changed.
