@@ -19,6 +19,7 @@ This wiki preserves reusable engineering decisions for `live-lecture-translation
 - [Historical experiments](../docs/experiments/README.md): measured values, conditions, estimates, and limits without source content.
 - [Version 0.9 boundary](../docs/release-0.9.md): preserved behavior, known limitations, and development questions.
 - [Retirement and recovery rules](engineering-decisions.md#retire-a-checkout-without-erasing-unfinished-work): preserve unfinished stages, restore ignored data and shared dependencies separately from Git, and identify the actual runtime source.
+- [Publishing alongside parallel work](engineering-decisions.md#publish-completed-work-without-absorbing-parallel-edits): distinguish working, tested, published and running versions; isolate feature hunks and validate their dependencies while preserving concurrent edits.
 - [File-back log](log.md): changes to this knowledge base.
 
 When adding a lesson, state the observation, reusable decision, and remaining uncertainty. Update the closest topic page first, this index if needed, and the log last. Do not copy an entire session narrative when a short design rule and its limits are sufficient. New experiments should distinguish fresh measurements from historical results and unexecuted estimates.
