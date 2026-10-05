@@ -110,6 +110,18 @@ Saving a symbolic link does not save its target. Retain or explicitly account fo
 
 Repository HEAD, the files selected for extraction, and the source loaded by a running process can differ. Freeze the selected file inventory including dirty and untracked source, record hashes, and compare before and after extraction. Relate it to a session through its saved `source-at-start` files and `runtime-manifest`, where available; do not infer runtime identity from a branch name or current HEAD alone. Keep that private evidence separate from the public file allowlist. Matching hashes establishes source correspondence, not a clean installation, working microphone, correct model output, or successful cloud execution; report those validation layers separately.
 
+## Make the first recorded-audio experiment a complete path
+
+A first-use guide must connect the user's file to the final reading screen: where to put it, how to select its length, what an input check establishes, whether to run recognition alone or cloud translation too, how to recognize completion, and how to open that exact run. Format conversion belongs inside the application, not in a prerequisite shell recipe. Put public sample acquisition and comparative experiments after this path. Keep key files and authorization examples private by default, and show the complete replay-only configuration rather than sending the reader back to microphone startup instructions.
+
+Retain one exact prepared audio file for both recognition and playback, including prefix runs. The experiment runner now accepts MP3, M4A, video and noncanonical WAV directly; `--seconds` selects the prefix internally. Preserve the original separately, record both hashes and conversion settings, and use the canonical input path/hash for cloud authorization. A check can temporarily decode without persistent writes or inference; a run retains the verified result under ignored storage after preflight. Do not overwrite a corrupted existing import or widen authorization to make a conversion succeed. A successful decode cannot establish the completeness of an unknown recording.
+
+Read the viewer's session path and prepared audio path from the chosen run's manifest rather than guessing the latest directory or passing the original full-length recording. Explain that the current runner is silent until completion and that ASR-only output has no Japanese translation or understanding notes. The low-level replay and standalone ASR probe can retain strict WAV contracts while the user-facing import handles format differences.
+
+Validate conversion, processing and playback as one route. A correctly shortened WAV is not sufficient if a later component still opens the original full-length recording. Exercise the manifest-to-viewer path with synthetic recognition, verify exact duration and unchanged originals, and distinguish temporary check output from retained run output. Keep conversion parameters and decoder/implementation identity alongside input hashes; do not assume different decoder versions produce identical samples.
+
+Validate copyable commands without starting inference or paid APIs. Test the selected publication tree separately when other agents have unfinished changes in the shared checkout: a passing development tree does not establish that the smaller commit has all its dependencies. Separate these checks from a clean installation, real recognition quality and account-specific cloud success. See the [recorded-audio walkthrough](../docs/audio-experiments.md).
+
 ## Open questions
 
 - What fraction of eligible speech can be translated promptly under sustained high speech density?

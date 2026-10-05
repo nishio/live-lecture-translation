@@ -38,7 +38,7 @@ Download or clone the repository, then run the initial setup from its directory.
 
 Before using the application at a lecture, try an existing recording on your Mac to see how transcription, Japanese translation, and key points appear.
 
-Follow the [recorded-audio guide](docs/audio-experiments.md), starting with a short English recording in 16 kHz mono PCM16 WAV format. Choose transcription alone or add Japanese translation and key points through the paid API, then view the results with audio playback. No microphone is needed.
+Follow the [recorded-audio guide](docs/audio-experiments.md), starting with the first two minutes of an English recording. You can use MP3, M4A, WAV, or a video with audio. Choose transcription alone or add Japanese translation and key points through the paid API, then view the results with audio playback. No microphone is needed.
 
 Explore the [sample output](samples/audrey-plurality-seoul-2023/README.md) to see the English transcription, Japanese translation, key points, concept explanations, and actual API cost. The source is [Audrey Tang's lecture](https://www.youtube.com/watch?v=4_tge6XJhGA), published by Code for Japan with a CC BY license notice. Reading the sample requires no setup or API use. The generated output is uncorrected.
 

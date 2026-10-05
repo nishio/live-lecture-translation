@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Accept local MP3, M4A, video and noncanonical WAV files in recorded-audio experiments. Convert and trim internally, preserve the original, and reuse the exact prepared audio for recognition and playback. Bundle the decoder in setup and retain source/conversion provenance.
 - Prefer sentence-like source-row endings in every continuous translation block and retain unfinished tails with a distinct continuation-wait state. Preserve explicit reasons for fragments forced by limits, source gaps, processed-audio timeout or final drain; boundary waits consume no generation interval and retries retain frozen inputs. This first stage keeps whole-row coverage and does not integrate provisional ASR or revise published translations.
 - Add an explicit offline ASR probe comparing 2–30-second chunks and revisable rolling windows, with separate warmup, processing measurements, estimated publication timing, and retained incomplete work. Record the authorized public-audio comparison without changing live defaults.
 - Collapse adjacent repeated uncertain recognition into one reading row, allowing case/whitespace differences while preserving every source record, uncertainty flag and publication time.
@@ -16,7 +17,7 @@
 - Add direct previous/next understanding navigation and retain concept versions without scrolling away from a reader. Load older persisted analysis/concept history beyond the recent 60-snapshot window while retaining source links in saved data.
 - Rename contextual translation and focus headings to describe their actual tasks. Refine the existing analysis prompt to preserve questions and qualifications, avoid repetition, and provide useful concept explanations. Comprehension gains remain unmeasured.
 - Classify cloud failures and add up to three automatic retries within a five-minute start window for recoverable failures in continuous mode. Respect server retry delays, permit pausing, preserve frozen request input and every unresolved reservation, and keep other stages independent.
-- Add a user-audio experiment CLI: a read-only WAV check with historical cost illustration, and explicit isolated ASR/authorized cloud runs with input identity, settings, completion, and cost records.
+- Add a user-audio experiment CLI: a local-media check without persistent writes and with historical cost illustration, and explicit isolated ASR/authorized cloud runs with input identity, settings, completion, and cost records.
 
 The v0.9.0 tag and existing recording sessions are unchanged. No new model-quality, real-network recovery, or live-listening benchmark is implied.
 

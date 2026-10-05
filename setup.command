@@ -13,6 +13,7 @@ command -v swiftc >/dev/null || { print -u2 -- 'Install Apple Command Line Tools
 python3 -c 'import sys; assert sys.version_info >= (3, 12), "Python 3.12 or newer required"'
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -c 'import imageio_ffmpeg; imageio_ffmpeg.get_ffmpeg_exe()'
 print -- 'Downloading the pinned local ASR model into this repository. No audio is captured or sent.'
 .venv/bin/python scripts/prepare_model.py
 print -- 'Setup complete. See README.md for text-only cloud authorization and starting the app.'

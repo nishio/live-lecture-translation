@@ -79,9 +79,12 @@ class ExperimentTest(unittest.TestCase):
                 patch.object(experiment, '_run_child', side_effect=AssertionError('child started')):
             result = self.plan('--seconds', '.25')
         self.assertEqual(before, sorted(self.root.rglob('*')))
-        self.assertEqual(1, result['input']['duration_seconds'])
+        self.assertEqual(.25, result['input']['duration_seconds'])
         self.assertEqual(4000, result['input']['selected_frames'])
-        self.assertEqual(hashlib.sha256(self.audio.read_bytes()).hexdigest(), result['input']['sha256'])
+        self.assertEqual(hashlib.sha256(self.audio.read_bytes()).hexdigest(), result['source']['sha256'])
+        self.assertNotEqual(result['source']['sha256'], result['input']['sha256'])
+        self.assertFalse(Path(result['input']['path']).exists())
+        self.assertTrue(result['conversion']['required'])
         self.assertEqual('off', result['configuration']['provider'])
         self.assertEqual(0, result['cost']['planned_api_usd'])
         self.assertIn('not current pricing', result['cost']['conditions'])
@@ -93,11 +96,16 @@ class ExperimentTest(unittest.TestCase):
                     experiment.main(args)
                 self.assertEqual(0, caught.exception.code)
 
-    def test_check_rejects_unsupported_and_empty_audio(self):
-        for settings in ({'channels': 2}, {'rate': 44100}, {'width': 1}, {'frames': 0}):
-            with self.subTest(settings=settings):
-                self.write_audio(**settings)
-                self.assertEqual(2, self.invoke())
+    def test_check_rejects_empty_audio(self):
+        self.write_audio(frames=0)
+        self.assertEqual(2, self.invoke())
+
+    def test_full_canonical_audio_reuses_original_bytes_without_a_decoder(self):
+        with patch('lecture_media.find_ffmpeg', side_effect=AssertionError('decoder used')):
+            plan = self.plan()
+        self.assertFalse(plan['conversion']['required'])
+        self.assertEqual(str(self.audio), plan['input']['path'])
+        self.assertEqual(plan['source']['sha256'], plan['input']['sha256'])
 
     def test_check_rejects_truncated_or_non_wav_input(self):
         self.audio.write_bytes(self.audio.read_bytes()[:-8])
@@ -140,8 +148,9 @@ class ExperimentTest(unittest.TestCase):
     def test_model_preflight_failure_starts_no_process_or_run(self):
         self.metadata.unlink()
         with patch.object(experiment, '_run_child', side_effect=AssertionError('child started')):
-            self.assertEqual(2, self.invoke('run'))
+            self.assertEqual(2, self.invoke('run', '--seconds', '.25'))
         self.assertFalse((self.root / 'results').exists())
+        self.assertFalse((self.root / 'data').exists())
 
     def test_cloud_rejects_unlisted_source_before_asr_and_keeps_ledger_unchanged(self):
         import lecture_cloud_scope as scope
@@ -153,10 +162,31 @@ class ExperimentTest(unittest.TestCase):
         ledger = self.root / 'scope-ledger'
         with patch.object(scope, 'DEFAULT_LEDGER_DIR', ledger), \
                 patch.object(experiment, '_run_child', side_effect=AssertionError('child started')):
-            self.assertEqual(2, self.invoke('run', '--cloud', '--authorization', str(auth)))
+            self.assertEqual(2, self.invoke('run', '--cloud', '--authorization', str(auth), '--seconds', '.25'))
         self.assertIn('exact input path', self.stderr.getvalue())
         self.assertFalse(ledger.exists())
         self.assertFalse((self.root / 'results').exists())
+        self.assertFalse((self.root / 'data').exists())
+
+    def test_cloud_authorization_uses_prepared_input_before_it_is_materialized(self):
+        import lecture_cloud_scope as scope
+        import event_insights_cloud as cloud
+        today = datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()
+        auth = self.root / 'auth.json'
+        plan = self.plan('--cloud', '--authorization', str(auth), '--seconds', '.25')
+        auth.write_text(json.dumps({'human_approved': True, 'allowed_dates': [today],
+            'destination': cloud.API_URL, 'raw_audio_allowed': False,
+            'daily_budget_usd_by_date': {today: 1},
+            'allowed_models': ['gpt-6.1-sol'], 'microphone_date': today,
+            'microphone_max_seconds': 21600,
+            'replay_sources': [{'path': plan['input']['path'], 'sha256': plan['input']['sha256']}]}))
+        original = auth.read_bytes()
+        with patch.object(scope, 'DEFAULT_LEDGER_DIR', self.root / 'scope-ledger'), \
+                patch.object(cloud, 'has_api_key', return_value=True), \
+                patch.object(cloud, 'budget_status', return_value={'spent_usd': 0, 'budget_usd': 1}):
+            experiment._preflight(plan)
+        self.assertFalse(Path(plan['input']['path']).exists())
+        self.assertEqual(original, auth.read_bytes())
 
     def test_run_preserves_same_source_and_uses_new_private_directories(self):
         with patch.object(experiment, '_run_child', side_effect=self.fake_run()):
@@ -188,7 +218,65 @@ class ExperimentTest(unittest.TestCase):
             self.assertEqual(2, self.invoke('run'))
         saved = json.loads(Path(json.loads(self.stdout.getvalue())['manifest']).read_text())
         self.assertFalse(saved['input_unchanged'])
+        self.assertFalse(saved['source_unchanged'])
         self.assertFalse(saved['completion_confirmed'])
+
+    def test_prefix_run_retains_matching_playback_audio_and_original_provenance(self):
+        original = self.audio.read_bytes()
+        plan = self.plan('--seconds', '.25')
+        with patch.object(experiment, '_run_child', side_effect=self.fake_run(audio_seconds=.25)) as child:
+            self.assertEqual(0, self.invoke('run', '--seconds', '.25'), self.stderr.getvalue())
+        saved = json.loads(Path(json.loads(self.stdout.getvalue())['manifest']).read_text())
+        normalized = Path(saved['input']['path'])
+        self.assertEqual(plan['input'], experiment.inspect_audio(normalized))
+        self.assertEqual(.25, saved['input']['duration_seconds'])
+        self.assertEqual(str(self.audio), saved['source']['path'])
+        self.assertTrue(saved['source_unchanged'])
+        self.assertTrue(saved['input_unchanged'])
+        self.assertEqual(original, self.audio.read_bytes())
+        command = child.call_args.args[0]
+        self.assertEqual(str(normalized), command[command.index('--replay') + 1])
+        self.assertEqual(.25, float(command[command.index('--duration') + 1]))
+
+    def test_source_mutation_is_incomplete_even_with_unchanged_prepared_input(self):
+        with patch.object(experiment, '_run_child', side_effect=self.fake_run(audio_seconds=.25, mutate_input=True)):
+            self.assertEqual(2, self.invoke('run', '--seconds', '.25'))
+        saved = json.loads(Path(json.loads(self.stdout.getvalue())['manifest']).read_text())
+        self.assertTrue(saved['input_unchanged'])
+        self.assertFalse(saved['source_unchanged'])
+        self.assertFalse(saved['completion_confirmed'])
+
+    def test_changed_source_between_check_and_import_is_rejected(self):
+        plan = self.plan('--seconds', '.25')
+        self.write_audio(frames=8000)
+        with patch.object(experiment, '_run_child', side_effect=AssertionError('child started')):
+            with self.assertRaisesRegex(experiment.ExperimentError, 'Original input changed'):
+                experiment.execute(plan)
+        self.assertFalse((self.root / 'data').exists())
+
+    def test_existing_import_is_reused_but_corrupted_import_is_not_overwritten(self):
+        plan = self.plan('--seconds', '.25')
+        experiment._materialize_input(plan)
+        target = Path(plan['input']['path'])
+        original = target.read_bytes()
+        inode = target.stat().st_ino
+        experiment._materialize_input(plan)
+        self.assertEqual(original, target.read_bytes())
+        self.assertEqual(inode, target.stat().st_ino)
+        target.write_bytes(original[:-2])
+        damaged = target.read_bytes()
+        with self.assertRaises(ValueError):
+            experiment._materialize_input(plan)
+        self.assertEqual(damaged, target.read_bytes())
+        self.assertEqual([target], list(target.parent.iterdir()))
+
+    def test_import_directory_cannot_redirect_outside_private_data(self):
+        (self.root / 'data').mkdir()
+        elsewhere = self.root / 'elsewhere'
+        elsewhere.mkdir()
+        (self.root / 'data/audio-imports').symlink_to(elsewhere, target_is_directory=True)
+        self.assertEqual(2, self.invoke('check', '--seconds', '.25'))
+        self.assertEqual([], list(elsewhere.iterdir()))
 
     def test_refuses_symlinked_output_root_outside_repository(self):
         elsewhere = self.root / 'elsewhere'
@@ -211,7 +299,8 @@ class ExperimentTest(unittest.TestCase):
                 results_root=Path(command[command.index('--results-root') + 1]),
                 transcriber=asr, continuous_translation=True)
             try:
-                app.start({'provider': 'off', 'language': 'en'}, replay=self.audio, pace=0)
+                replay = Path(command[command.index('--replay') + 1])
+                app.start({'provider': 'off', 'language': 'en'}, replay=replay, pace=1)
                 app.source_thread.join(5)
                 app.worker.join(5)
                 self.assertFalse(app.worker.is_alive())
@@ -220,12 +309,15 @@ class ExperimentTest(unittest.TestCase):
             return {'returncode': 0, 'interrupted': False, 'shutdown_confirmed': complete}
         with patch.object(experiment, '_run_child', side_effect=run), \
                 patch.object(live.LocalTranscriber, '__call__', side_effect=AssertionError('real ASR')):
-            self.assertEqual(0, self.invoke('run', '--pace', 'accelerated'))
+            self.assertEqual(0, self.invoke('run', '--seconds', '.25'))
         output = json.loads(self.stdout.getvalue())
         self.assertEqual('completed', output['stages']['asr']['state'])
         manifest = json.loads(Path(output['manifest']).read_text())
         self.assertTrue(Path(manifest['state_path']).is_file())
-        self.assertEqual(1, manifest['stages']['asr']['through_seconds'])
+        self.assertEqual(.25, manifest['stages']['asr']['through_seconds'])
+        from lecture_demo import DemoTimeline
+        timeline = DemoTimeline(Path(manifest['state_path']).parent, audio_file=Path(manifest['input']['path']))
+        self.assertEqual(.25, timeline.audio_seconds)
 
 
 if __name__ == '__main__':

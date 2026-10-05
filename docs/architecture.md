@@ -107,6 +107,14 @@ In continuous cloud mode, transport failures, HTTP 408/5xx, and explicitly ident
 
 These changes do not implement recovery after process exit or a reconnect catch-up burst. [Audio experiments](audio-experiments.md) provide an isolated saved-file entry point for comparing pipeline settings; microphone and live comprehension evaluation remain separate.
 
+## Import a user's audio inside the application
+
+`lecture_experiment.py` accepts a local audio/video file. `lecture_media.py` normalizes it to mono 16 kHz PCM16 WAV and applies an optional prefix selected with `--seconds`. Setup includes a pinned `imageio-ffmpeg` decoder; an installed system FFmpeg is a fallback. The first audio track is selected. Full canonical WAVs keep their original path and bytes, and canonical prefixes use Python's WAV reader. Other formats use a local FFmpeg subprocess with restricted formats/protocols, followed by a deterministic WAV header. URLs, playlists and external media references are not supported. The original file is never rewritten.
+
+`check` validates the complete readable source and prepares any conversion in temporary storage, then deletes it. It performs no recognition, API request or persistent cache write. The plan separates original `source` identity from canonical `input` identity and records conversion settings. For converted input, the planned path is `data/audio-imports/<sha256>/audio.wav`; it need not exist yet. Cloud authorization must name that exact canonical path and hash. The application does not expand or rewrite authorization.
+
+`run` checks model and cloud prerequisites, recreates and verifies the planned conversion, and atomically retains it without overwriting an existing mismatched file. The experiment manifest records both identities, decoder version when used, implementation hashes, selected duration and stage outcomes. Recognition and the saved-result viewer use this same `input.path`, so prefix runs also have matching playback duration. Completion requires unchanged source and canonical input as well as confirmed stage completion. Decoder errors fail before recognition; a valid decode cannot prove that a compressed recording contains every intended utterance or that its transcript is accurate.
+
 ## Observe a recorded run at its original pace
 
 `lecture_demo.py` reconstructs a saved run using recorded publication events for ASR, continuous translation and analysis. Its default cursor is zero and its browser player advances at 1×. Optional audio comes from one explicitly selected local PCM WAV; authenticated loopback range requests allow normal media seeking. No capture, recognition, cloud client, authorization ledger or inference process is started.

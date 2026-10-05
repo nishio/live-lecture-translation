@@ -2,6 +2,8 @@
 
 Cloud processing sends recognized speech and selected transcript context for translation and analysis. The normal microphone workflow does not send the recorded audio. A key alone is insufficient: the application also requires a local authorization file defining the permitted text scope and budget.
 
+For your own recorded audio, use the complete [saved-audio walkthrough](audio-experiments.md). It includes a replay-only authorization file and key-file format. The `start.command --check --cloud` commands below check microphone startup and reject a zero microphone allowance; use `lecture_experiment.py` for recorded-audio experiments instead.
+
 ## Prepare your own authorization
 
 Copy the deliberately disabled example:
@@ -14,7 +16,7 @@ Review the JSON and set its fields for your own use. The example starts with `hu
 
 For microphone use, replace all three `YYYY-MM-DD` placeholders with the same intended use date in Japan Standard Time: the entry in `allowed_dates`, `microphone_date`, and the key in `daily_budget_usd_by_date`. Keep `gpt-6.1-sol` in `allowed_models`; the microphone launcher selects that model.
 
-For a saved-audio-only run, set `microphone_max_seconds` to `0` and list the exact input path and SHA256 under `replay_sources`. Zero disables every microphone-text request, including an empty one, while preserving explicitly authorized replay. Existing microphone reservations remain in the ledger when this allowance is disabled.
+For a saved-audio-only run, set `microphone_max_seconds` to `0` and list `input.path` and `input.sha256` from `lecture_experiment.py check` under `replay_sources`. These identify the actual PCM WAV used for recognition, including any internal conversion or selected prefix; `source` identifies the original file and is not the replay authorization target. Use the same source and `--seconds` value for `check` and `run`. A check does not save converted audio; a run verifies the converted input against authorization before inference. The application never edits authorization automatically. Zero disables every microphone-text request, including an empty one, while preserving explicitly authorized replay. Existing microphone reservations remain in the ledger when this allowance is disabled.
 
 The authorization JSON is authoritative for the allowed daily budget. A day not explicitly authorized has a zero allowance. Day boundaries use Japan Standard Time. Text duration and USD budget are independent limits; having room in one does not override the other. The supported cloud model labels are `gpt-6-luna` and `gpt-6.1-sol`.
 

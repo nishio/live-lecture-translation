@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Check a saved WAV, or explicitly run it through the existing lecture pipeline.
+"""Import local audio/video and explicitly run the existing lecture pipeline.
 
-The check command uses only the standard library and never starts recognition,
-network activity, a server, or file writes. Run creates a new private experiment;
-it never resumes or overwrites an existing lecture session.
+Check may decode into temporary files, removed on exit, but never starts
+recognition, network activity or persistent writes. Run creates a new private
+experiment and retains its normalized audio without changing the original.
 """
 from __future__ import annotations
 
@@ -16,12 +16,13 @@ import math
 import os
 from pathlib import Path
 import signal
-import stat
+import shutil
 import subprocess
 import sys
 import time
 import uuid
-import wave
+
+from lecture_media import inspect_pcm_audio as inspect_audio, prepared_audio, source_identity
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -34,46 +35,23 @@ class ExperimentError(ValueError):
     pass
 
 
-def _identity(value):
-    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
+def _import_path(sha256):
+    root = (REPO / 'data/audio-imports').resolve()
+    if not root.is_relative_to(REPO.resolve() / 'data'):
+        raise ExperimentError('data/audio-imports must remain inside the ignored repository directory.')
+    target = root / sha256 / 'audio.wav'
+    if target.is_symlink() or not target.resolve().is_relative_to(root):
+        raise ExperimentError('Prepared audio must not redirect outside its private import directory.')
+    return target.resolve()
 
 
-def inspect_audio(path, seconds=None):
-    """Read and hash the complete input, including checking for truncated PCM."""
-    path = Path(path).expanduser().resolve(strict=True)
-    if not stat.S_ISREG(path.stat().st_mode):
-        raise ExperimentError('Input must be a regular WAV file.')
-    if seconds is not None and (not math.isfinite(seconds) or seconds <= 0):
-        raise ExperimentError('--seconds must be finite and positive.')
-    with path.open('rb') as source:
-        before = os.fstat(source.fileno())
-        try:
-            with wave.open(source, 'rb') as audio:
-                if (audio.getnchannels(), audio.getsampwidth(), audio.getframerate(), audio.getcomptype()) != (1, 2, 16000, 'NONE'):
-                    raise ExperimentError('Use an uncompressed 16 kHz mono PCM16 WAV; automatic conversion is not performed.')
-                frames = audio.getnframes()
-                if frames <= 0:
-                    raise ExperimentError('The WAV contains no audio frames.')
-                observed_bytes = 0
-                while block := audio.readframes(65536):
-                    observed_bytes += len(block)
-                if observed_bytes != frames * 2:
-                    raise ExperimentError('The WAV is truncated or has incomplete PCM frames.')
-        except (wave.Error, EOFError) as exc:
-            raise ExperimentError('Cannot read this WAV; use uncompressed 16 kHz mono PCM16 audio.') from exc
-        source.seek(0)
-        digest = hashlib.sha256()
-        while block := source.read(1024 * 1024):
-            digest.update(block)
-        if _identity(before) != _identity(os.fstat(source.fileno())) or _identity(before) != _identity(path.stat()):
-            raise ExperimentError('Input changed during inspection; keep it unchanged and check again.')
-    selected_frames = frames if seconds is None else min(frames, int(Decimal(str(seconds)) * 16000))
-    if selected_frames <= 0:
-        raise ExperimentError('--seconds must select at least one audio frame.')
-    return {'path': str(path), 'sha256': digest.hexdigest(), 'file_bytes': before.st_size,
-            'sample_rate': 16000, 'channels': 1, 'sample_width_bytes': 2,
-            'frames': frames, 'duration_seconds': frames / 16000,
-            'selected_frames': selected_frames, 'selected_seconds': selected_frames / 16000}
+def _planned_audio(path, seconds):
+    with prepared_audio(path, seconds) as prepared:
+        audio = dict(prepared['input'])
+        conversion = dict(prepared['conversion'])
+        if conversion['required']:
+            audio['path'] = str(_import_path(audio['sha256']))
+        return dict(prepared['source']), audio, conversion
 
 
 def build_plan(args):
@@ -83,9 +61,9 @@ def build_plan(args):
         raise ExperimentError('--authorization, --key-file and --model require --cloud.')
     if args.label and (len(args.label) > 80 or any(ord(char) < 32 for char in args.label)):
         raise ExperimentError('--label must be at most 80 characters without control characters.')
-    source = inspect_audio(args.audio, args.seconds)
-    historical = HISTORICAL_USD_PER_HOUR * Decimal(str(source['selected_seconds'])) / 3600
-    return {'schema_version': 1, 'input': source, 'label': args.label,
+    source, audio, conversion = _planned_audio(args.audio, args.seconds)
+    historical = HISTORICAL_USD_PER_HOUR * Decimal(str(audio['selected_seconds'])) / 3600
+    return {'schema_version': 1, 'source': source, 'input': audio, 'conversion': conversion, 'label': args.label,
             'configuration': {'provider': 'openai' if args.cloud else 'off',
                 'model': (args.model or 'gpt-6.1-sol') if args.cloud else None,
                 'language': args.language, 'pace': args.pace, 'chunk_seconds': args.chunk_seconds,
@@ -167,6 +145,46 @@ def _save(path, value):
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _materialize_input(plan):
+    if source_identity(plan['source']['path']) != plan['source']:
+        raise ExperimentError('Original input changed after the check; check it again.')
+    if not plan['conversion']['required']:
+        if inspect_audio(plan['input']['path']) != plan['input']:
+            raise ExperimentError('Input changed after the check; check it again.')
+        return
+    target = _import_path(plan['input']['sha256'])
+    if str(target) != plan['input']['path']:
+        raise ExperimentError('Prepared input location changed after the check.')
+    with prepared_audio(plan['source']['path'], plan['conversion']['requested_seconds']) as prepared:
+        actual = {**prepared['input'], 'path': str(target)}
+        if prepared['source'] != plan['source'] or actual != plan['input']:
+            raise ExperimentError('Converted input changed after the check; check it again.')
+        if target.exists():
+            if inspect_audio(target) != plan['input']:
+                raise ExperimentError('Existing prepared audio has changed; it will not be overwritten.')
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if _import_path(plan['input']['sha256']) != target:
+            raise ExperimentError('Prepared input directory changed during import.')
+        temporary = target.with_name('.audio.' + uuid.uuid4().hex + '.wav')
+        try:
+            with temporary.open('xb') as destination, Path(prepared['input']['path']).open('rb') as source:
+                os.chmod(temporary, 0o600)
+                shutil.copyfileobj(source, destination)
+                destination.flush()
+                os.fsync(destination.fileno())
+            if {**inspect_audio(temporary), 'path': str(target)} != plan['input']:
+                raise ExperimentError('Prepared audio copy could not be verified.')
+            try:
+                os.link(temporary, target)  # Atomic publication without overwriting another importer.
+            except FileExistsError:
+                pass
+            if target.is_symlink() or inspect_audio(target) != plan['input']:
+                raise ExperimentError('Existing prepared audio does not match this input.')
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def command_for(plan, data_root, results_root):
@@ -255,9 +273,7 @@ def _read_outcome(results_root, cloud, expected_frames):
 
 def execute(plan):
     _preflight(plan)
-    current = inspect_audio(plan['input']['path'], plan['input']['selected_seconds'])
-    if current != plan['input']:
-        raise ExperimentError('Input changed after the check; check the input again.')
+    _materialize_input(plan)
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:10]
     data_root, results_root = (_private_root(kind) / run_id for kind in ('data', 'results'))
     data_root.mkdir(parents=True, exist_ok=False)
@@ -265,7 +281,8 @@ def execute(plan):
     manifest_path = results_root / 'experiment.json'
     manifest = {**plan, 'run_id': run_id, 'status': 'starting', 'started_at': time.time(),
                 'data_root': str(data_root), 'results_root': str(results_root), 'completion_confirmed': False,
-                'runner_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+                'runner_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                'media_preparation_sha256': hashlib.sha256(Path(__file__).with_name('lecture_media.py').read_bytes()).hexdigest()}
     _save(manifest_path, manifest)
     started = time.monotonic()
     def on_started(pid):
@@ -275,10 +292,17 @@ def execute(plan):
         child = _run_child(command_for(plan, data_root, results_root), results_root / 'process.log', on_started)
         outcome = _read_outcome(results_root, plan['configuration']['provider'] == 'openai',
                                 plan['input']['selected_frames'])
-        unchanged = inspect_audio(plan['input']['path'], plan['input']['selected_seconds']) == plan['input']
+        try:
+            unchanged = inspect_audio(plan['input']['path']) == plan['input']
+        except (OSError, ValueError):
+            unchanged = False
+        try:
+            source_unchanged = source_identity(plan['source']['path']) == plan['source']
+        except (OSError, ValueError):
+            source_unchanged = False
         complete = (child['returncode'] == 0 and child['shutdown_confirmed'] and not child['interrupted']
-                    and outcome['completion_confirmed'] and unchanged)
-        manifest.update(outcome, child=child, input_unchanged=unchanged, completion_confirmed=complete,
+                    and outcome['completion_confirmed'] and unchanged and source_unchanged)
+        manifest.update(outcome, child=child, source_unchanged=source_unchanged, input_unchanged=unchanged, completion_confirmed=complete,
                         status='completed' if complete else 'incomplete')
     except (OSError, ValueError) as exc:
         manifest.update(status='incomplete', completion_confirmed=False, error=str(exc))
@@ -299,7 +323,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest='action', required=True)
     for action in ('check', 'run'):
-        sub = subparsers.add_parser(action, help='Read-only input check' if action == 'check' else 'Start a new explicit recognition experiment')
+        sub = subparsers.add_parser(action, help='Check local media without persistent writes' if action == 'check' else 'Start a new explicit recognition experiment')
         sub.add_argument('audio', type=Path)
         sub.add_argument('--seconds', type=float, help='Use only this prefix (whole file by default)')
         sub.add_argument('--label', default='')
