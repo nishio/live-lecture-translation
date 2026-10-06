@@ -122,6 +122,52 @@ class LectureVerificationTests(unittest.TestCase):
                 self.assertFalse(report["cost_reference"]["all_additional_api_cost_verified"])
                 self.assertEqual(before, {str(path): sha(path.read_bytes()) for path in Path(tmp).rglob("*") if path.is_file()})
 
+    def with_translation(self, result_dir, *, state="completed", pending=0, history_blocks=None, state_blocks=None):
+        block = {"source_ids": ["c000000-l0000"], "text": "試験です。"}
+        history_blocks = [block] if history_blocks is None else history_blocks
+        state_blocks = history_blocks if state_blocks is None else state_blocks
+        put(result_dir / "translation-history.jsonl", {"cost_usd": 0.0, "blocks": history_blocks})
+        path = result_dir / "state.json"
+        saved = json.loads(path.read_text())
+        saved["translation"] = {"enabled": True, "state": state, "pending_lines": pending,
+                                "worker_alive": False, "blocks": state_blocks}
+        put(path, saved)
+
+    def test_complete_translation_matching_history_is_verified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result_dir, _ = fixture(Path(tmp))
+            self.with_translation(result_dir)
+            report = verify_session(result_dir)
+        self.assertEqual([], report["errors"])
+        self.assertEqual("verified_complete", report["status"])
+        self.assertEqual(1, report["translation"]["blocks"])
+
+    def test_failed_or_pending_translation_is_not_verified_complete(self):
+        for state, pending in (("failed", 1), ("completed", 1), ("paused", 0)):
+            with self.subTest(state=state, pending=pending), tempfile.TemporaryDirectory() as tmp:
+                result_dir, _ = fixture(Path(tmp))
+                self.with_translation(result_dir, state=state, pending=pending)
+                report = verify_session(result_dir)
+                self.assertEqual([], report["errors"])
+                self.assertFalse(report["complete_verified"])
+                self.assertFalse(report["processing_finished"])
+                self.assertNotEqual("verified_complete", report["status"])
+
+    def test_translation_blocks_must_match_sources_and_history(self):
+        cases = {
+            "translation_block_source_unknown": dict(history_blocks=[{"source_ids": ["c000009-l0000"], "text": "x"}]),
+            "translation_block_source_overlap": dict(history_blocks=[{"source_ids": ["c000000-l0000"], "text": "a"},
+                                                                     {"source_ids": ["c000000-l0000"], "text": "b"}]),
+            "state_translation_blocks_mismatch": dict(state_blocks=[{"source_ids": ["c000000-l0000"], "text": "別の訳"}]),
+        }
+        for code, options in cases.items():
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as tmp:
+                result_dir, _ = fixture(Path(tmp))
+                self.with_translation(result_dir, **options)
+                report = verify_session(result_dir)
+                self.assertIn(code, [error["code"] for error in report["errors"]])
+                self.assertEqual("failed", report["status"])
+
     def test_legacy_missing_translation_history_retains_analysis_only_aggregate(self):
         with tempfile.TemporaryDirectory() as tmp:
             result_dir, _ = fixture(Path(tmp))

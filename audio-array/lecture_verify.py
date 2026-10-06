@@ -187,9 +187,18 @@ def verify_session(path):
         analysis_done = analysis_state.get("state") == "completed" or (
             analysis_state.get("provider") == "off" and analysis_state.get("state") == "idle")
         processing_active = state.get("processing_active") is True
-        complete_candidate = audio_closed and capture_done and asr_done and analysis_done and not processing_active
+        translation_state = state.get("translation") or {}
+        translation_enabled = translation_state.get("enabled") is True
+        # A failed, paused or stopped translation with untranslated targets is
+        # preserved work, not a completed session.
+        translation_done = not translation_enabled or (
+            translation_state.get("state") in {"completed", "idle"}
+            and translation_state.get("pending_lines") == 0
+            and translation_state.get("worker_alive") is not True)
+        stages_done = asr_done and analysis_done and translation_done
+        complete_candidate = audio_closed and capture_done and stages_done and not processing_active
         report.update(session_id=session.get("id"), audio_closed=audio_closed,
-                      processing_finished=asr_done and analysis_done and not processing_active,
+                      processing_finished=stages_done and not processing_active,
                       processing_active_reported=processing_active,
                       scope="complete" if complete_candidate else "snapshot")
         snapshot = not complete_candidate
@@ -391,6 +400,35 @@ def verify_session(path):
         # Match the runtime cost report: both workloads contribute newly billed
         # cost_usd. cached_request_cost_usd is historical, not a new charge.
         translation_history = audit.rows(result_dir / "translation-history.jsonl", snapshot)
+        state_blocks = translation_state.get("blocks") or []
+        known_ids, covered = set(state_ids), set()
+        for number, block in enumerate(state_blocks):
+            sources = block.get("source_ids") if isinstance(block, dict) else None
+            if not audit.check(isinstance(sources, list) and bool(sources), "translation_block_shape_invalid", block=number):
+                continue
+            audit.check(set(sources) <= known_ids, "translation_block_source_unknown", block=number)
+            audit.check(not covered & set(sources) and len(sources) == len(set(sources)),
+                        "translation_block_source_overlap", block=number)
+            covered |= set(sources)
+        reconcile_blocks = translation_enabled or bool(state_blocks)
+        if not reconcile_blocks:
+            pass  # Cost-only legacy records; no published translation to reconcile.
+        elif translation_history and all(isinstance(row.get("blocks"), list) for row in translation_history):
+            saved = [(block.get("source_ids"), block.get("text"))
+                     for row in translation_history for block in row["blocks"]]
+            published = [(block.get("source_ids"), block.get("text"))
+                         for block in state_blocks if isinstance(block, dict)]
+            # History is durable before publication, so a snapshot's state may lag it.
+            audit.check(published == saved if complete_candidate else published == saved[:len(published)],
+                        "state_translation_blocks_mismatch")
+        elif translation_history:
+            audit.unverified.append("translation_history_blocks_missing")
+        elif state_blocks:
+            audit.check(False, "translation_history_missing")
+        report["translation"] = {"enabled": translation_enabled, "blocks": len(state_blocks),
+                                 "pending_lines": translation_state.get("pending_lines"),
+                                 "completion_required": translation_enabled,
+                                 "semantic_quality_verified": False}
         successful_cost = 0.0
         for kind, records in (("analysis", history), ("translation", translation_history)):
             for number, item in enumerate(records):
