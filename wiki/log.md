@@ -477,3 +477,7 @@ The user approved releasing the review fixes as 1.0.1. Updated VERSION, both REA
 Implemented high review items 5–7 from [the review page](review-2026-10-06.md). Session verification now requires translation to be complete, with no pending targets, and reconciles translation blocks with their sources and history. Preview WAVs are removed after recognition, and their frame range and PCM hash are kept. Read-only measurement of existing sessions confirmed that previews took about twice the space of the recording itself. CI gains a macOS 3.12/3.14 job in which any skipped test fails. Data handling documents the preview removal; the changelog lists the changes as Unreleased.
 
 New verification and preview regressions fail on the previous source. Before running native tests locally, I confirmed that no capture process was running. 592 tests then ran on macOS without skips, and both Node UI suites passed. No capture, model inference or paid API request was performed.
+
+## [2026-10-06] release | Version 1.0.2
+
+The user approved releasing 1.0.2 once CI passed. CI on `e305494` passed: Linux ran 592 tests with 12 expected skips, and macOS on Python 3.12 and 3.14 ran all 592 tests without skips. Updated VERSION, both READMEs and the changelog, and added a 1.0.2 section to the release notes. Source identity: `bce80a48ddea996ce5df277e0406badaef238f67afd0afac252f78e25fae63d2` across 71 files. No capture, inference or paid API request was performed.

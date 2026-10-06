@@ -22,7 +22,7 @@ The latest original speech appears at the end of 「原文」, refreshed about e
 
 The dashboard is in Japanese and is designed to support English lecture listening with Japanese text. Automatic language detection and Japanese recognition are also available; Japanese source lines are not translated into Japanese.
 
-Version **1.0.1** is available for Apple Silicon Macs. See the [release notes and validation status](docs/release-1.0.md) before using it at a lecture, and the [changelog](CHANGELOG.md) for changes since v0.9.0.
+Version **1.0.2** is available for Apple Silicon Macs. See the [release notes and validation status](docs/release-1.0.md) before using it at a lecture, and the [changelog](CHANGELOG.md) for changes since v0.9.0.
 
 ## Try it before a live lecture
 

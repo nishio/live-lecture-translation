@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.2 — 2026-10-06
+
+Patch release: session verification covers translation, preview audio no longer accumulates on disk, and CI runs every test on macOS. No new capture, inference or paid API validation; see the [release notes](docs/release-1.0.md#102-patch-release).
 
 - `lecture_verify` no longer reports a session as `verified_complete` while translation is failed, paused or still has untranslated targets. It also checks that translation blocks cite existing, non-overlapping source lines and match the saved translation history.
 - Remove each provisional preview WAV after its recognition returns or fails. Previously these copies used about twice the disk space of the recording itself (40 MB against 20 MB in the 325-second Audrey run), outside the startup storage estimate. The frame range and PCM hash stay in the preview history; existing session files are not deleted.

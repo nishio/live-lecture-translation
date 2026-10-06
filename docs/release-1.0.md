@@ -1,6 +1,16 @@
 # Version 1.0 release
 
-**Status: 1.0.1, 2026-10-06** ([patch release](#101-patch-release) of 1.0.0). First stable release for Apple Silicon Macs, including independent cloud translation and analysis validated in the actual Audrey saved-audio demo. Installation, synthetic preparation/immediate-stop checks, fresh-process local startup trials and saved-audio cloud replays passed. Same-session recording pause/resume is not implemented; current-version real microphone/cloud acceptance remains a follow-up. Release approval does not mark those checks as passed. The `v0.9.0` baseline and running sessions remain unchanged.
+**Status: 1.0.2, 2026-10-06** (patch releases [1.0.2](#102-patch-release) and [1.0.1](#101-patch-release) of 1.0.0). First stable release for Apple Silicon Macs, including independent cloud translation and analysis validated in the actual Audrey saved-audio demo. Installation, synthetic preparation/immediate-stop checks, fresh-process local startup trials and saved-audio cloud replays passed. Same-session recording pause/resume is not implemented; current-version real microphone/cloud acceptance remains a follow-up. Release approval does not mark those checks as passed. The `v0.9.0` baseline and running sessions remain unchanged.
+
+## 1.0.2 patch release
+
+1.0.2 continues the [review](../wiki/review-2026-10-06.md) follow-up:
+
+- `lecture_verify` reports `verified_complete` only when translation is also complete with no pending targets. It reconciles translation blocks with their source lines and saved history.
+- Provisional preview WAVs are removed after recognition. They had used about twice the recording's own disk space: 40 MB against 20 MB in the 325-second Audrey run. Their frame range and PCM hash remain in the preview history.
+- CI adds macOS jobs on Python 3.12 and 3.14 with launcher, decoder and native synthetic tests enabled; any skipped test fails the job.
+
+Release source identity: `bce80a48ddea996ce5df277e0406badaef238f67afd0afac252f78e25fae63d2`, across 71 files, using the method below. CI on the release candidate commit passed: Linux ran 592 tests with 12 expected skips (launcher and native), and macOS on Python 3.12 and 3.14 ran all 592 tests without skips. Both Node UI suites passed. No real capture, model inference or paid API request ran. The 1.0.0 measurements and acceptance status are unchanged.
 
 ## 1.0.1 patch release
 
