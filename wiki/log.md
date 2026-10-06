@@ -455,3 +455,9 @@ Validation: 582 CPU-only Python tests in 119.167 seconds, with 580 passed and tw
 The user requested a whole-repository review. Four read-only reviewers covered core runtime, cloud stages, UI/demo and repository/docs at `2be891f`; selected high-severity claims were re-read in the source. Created [the review page](review-2026-10-06.md) with reusable lessons, prioritized findings and confirmed-sound areas, then added it to the index. Recorded that the notification migration patch no longer applies to the current dashboard source. The bundled-demo commit `9966092` landed in parallel and supersedes only the unused-sample remark.
 
 576 CPU-only Python tests passed in the project environment with two opt-in native skips; both Node UI suites passed. No capture, inference or paid API request was performed.
+
+## [2026-10-06] fix | Review follow-up for local failures, durable publication and over-estimate cost
+
+Implemented the high review items from [the review page](review-2026-10-06.md). Pre-dispatch local failures no longer pause recognition. Transcript and analysis history are written before they are published. Measured cost is kept separate from the budget-blocking charge. Refusals of identical input after an earlier failed or unconfirmed attempt have their own categories. The review's first item turned out to be a deliberate no-automatic-resend rule backed by an existing test, so that rule was kept. New regressions fail on the previous source, except the lifecycle contract test for an unreachable Ollama.
+
+588 CPU-only Python tests passed with two opt-in native skips, and both Node UI suites passed. No capture, model inference or paid API request was performed. The changes change the release source identity and belong after v1.0.0.

@@ -267,6 +267,43 @@ class LectureLifecycleTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             app.start({'provider': 'local'}, replay=self.wav)
 
+    def test_unreachable_ollama_does_not_pause_later_asr(self):
+        from event_insights import ModelUnavailableError
+
+        def unreachable(*args, **kwargs):
+            error = ModelUnavailableError('synthetic refused connection')
+            error.local_inference_finished = True
+            raise error
+
+        app = self.app(analyzer=unreachable, analysis_interval=1)
+        app.start({'provider': 'local'}, replay=self.wav, pace=1)
+        self.settle(app)
+        self.assertFalse(app.inference_unconfirmed)
+        self.assertEqual('completed', app.snapshot()['asr']['state'])
+        self.assertEqual(2.5, app.snapshot()['asr']['through_seconds'])
+        self.assertEqual('failed', app.snapshot()['analysis']['state'])
+
+    def test_transcript_write_failure_keeps_chunk_out_of_published_state(self):
+        real_append = lecture_live.append_json
+
+        def append(path, value):
+            if Path(path).name == 'transcript.jsonl' and value['chunk']['index'] == 1:
+                raise OSError('synthetic full disk')
+            return real_append(path, value)
+
+        app = self.app(analysis_interval=1000)
+        with patch.object(lecture_live, 'append_json', side_effect=append):
+            app.start({'provider': 'local'}, replay=self.wav, pace=0)
+            self.settle(app)
+        status = app.snapshot()
+        published = {line['id'][:7] for line in status['lines']}
+        self.assertNotIn('c000001', published)
+        self.assertIn('c000000', published)
+        self.assertEqual([1], [chunk['index'] for chunk in status['asr']['failed_chunks']])
+        saved = [json.loads(row)['chunk']['index'] for row in
+                 (app.result_dir / 'transcript.jsonl').read_text().splitlines()]
+        self.assertNotIn(1, saved)
+
     def test_known_model_response_failure_does_not_pause_later_asr(self):
         from lecture_analysis import SnapshotResponseError
 

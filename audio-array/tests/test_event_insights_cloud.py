@@ -401,6 +401,28 @@ class CloudInsightsTest(unittest.TestCase):
         self.assertNotIn("synthetic", ledger_text)
         self.assertNotIn("合成試験", ledger_text)
 
+    def test_underestimate_blocks_budget_without_reporting_it_as_measured_cost(self):
+        measured_response = response()
+        measured_response["usage"] = {"input_tokens": 200000, "output_tokens": 100,
+                                      "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0}}
+        with patch.object(cloud, "_post", return_value=measured_response):
+            result = self.generate()
+        measured = (200000 * 100 + 100 * 500) / 1e9
+        self.assertAlmostEqual(measured, result["cost_usd"])
+        self.assertTrue(result["usage_confirmed"])
+        self.assertAlmostEqual(1 - measured, result["budget_hold_usd"])
+        status = cloud.budget_status()
+        self.assertEqual(1, status["spent_usd"])
+        self.assertAlmostEqual(1 - measured, status["reserved_usd"])
+        entry, = cloud._load_ledger()["requests"].values()
+        self.assertEqual(("completed", 1_000_000_000, 20_050_000),
+                         (entry["state"], entry["charged_nanodollars"], entry["measured_nanodollars"]))
+        self.assertEqual(20_050_000, cloud.confirmed_nanodollars(entry))
+        other = [{"role": "system", "content": "Return JSON."}, {"role": "user", "content": "other"}]
+        with patch.object(cloud, "_post", side_effect=AssertionError("API")):
+            with self.assertRaises(cloud.BudgetExceededError):
+                cloud.generate(other, SCHEMA, validate=json.loads)
+
     def test_pure_payload_keeps_legacy_luna_bytes_and_hash(self):
         original = json.dumps([MESSAGES, SCHEMA], sort_keys=True)
         with patch.object(cloud, "_api_key", side_effect=AssertionError("key read")), \
@@ -539,9 +561,11 @@ class CloudInsightsTest(unittest.TestCase):
             with self.assertRaises(cloud.CloudError):
                 self.generate()
             before = cloud.budget_status()
-            with self.assertRaisesRegex(cloud.CloudError, "再送しません"):
+            with self.assertRaisesRegex(cloud.CloudError, "再送しません") as blocked:
                 self.generate()
         api.assert_called_once()
+        self.assertEqual('previous_attempt_failed', blocked.exception.category)
+        self.assertFalse(blocked.exception.retryable)
         self.assertGreater(before["reserved_usd"], 0)
         self.assertEqual(before, cloud.budget_status())
 
@@ -565,6 +589,10 @@ class CloudInsightsTest(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt):
                 self.generate()
         held = cloud.budget_status()["spent_usd"]
+        with patch.object(cloud, "_post", side_effect=AssertionError("resent")):
+            with self.assertRaisesRegex(cloud.CloudError, "完了を確認できていません") as blocked:
+                self.generate()
+        self.assertEqual('previous_attempt_unresolved', blocked.exception.category)
         with patch.object(cloud, "_post", return_value=response()):
             result = self.generate(retry_failed=True)
         self.assertAlmostEqual(held + result["cost_usd"], result["spent_usd"])

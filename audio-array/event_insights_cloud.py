@@ -276,13 +276,27 @@ def _spent(ledger, day):
     return sum(item["charged_nanodollars"] for item in ledger["requests"].values() if item["day"] == day)
 
 
+def confirmed_nanodollars(item):
+    """Measured usage cost of a ledger entry; the rest of its charge is a hold.
+
+    An over-estimate settlement charges the whole daily budget to block further
+    spending. Only its recorded measurement is confirmed cost.
+    """
+    if item["state"] != "completed":
+        return 0
+    measured = item.get("measured_nanodollars")
+    if type(measured) is int and 0 <= measured <= item["charged_nanodollars"]:
+        return measured
+    return item["charged_nanodollars"]
+
+
 def budget_status():
     # Atomic replacement makes this read safe without creating a file during probe.
     ledger, day = _load_ledger(), _day()
     budget = _budget(day)
     spent = _spent(ledger, day)
-    held = sum(item["charged_nanodollars"] for item in ledger["requests"].values()
-               if item["day"] == day and item["state"] != "completed")
+    held = sum(item["charged_nanodollars"] - confirmed_nanodollars(item)
+               for item in ledger["requests"].values() if item["day"] == day)
     return {"spent_usd": spent / NANODOLLARS, "budget_usd": budget / NANODOLLARS,
             "reserved_usd": held / NANODOLLARS, "budget_date": day, "budget_timezone": "Asia/Tokyo",
             "pricing_date": PRICING_DATE}
@@ -448,7 +462,13 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
                 checked = validate(cached["output_text"])
                 return {**cached, "result": checked, "cache_hit": True, **budget_status()}
             if not retry_failed and any(item["state"] != "cancelled_unsent" for item in previous):
-                raise CloudError("同じ入力は処理中または前回失敗済みです。自動では再送しません。失敗後は手動で再試行できます。")
+                # Deliberate: an earlier failed or unknown attempt may already be
+                # billed, so identical input is never re-sent without admission.
+                if any(item["state"] == "reserved" for item in previous):
+                    raise CloudError("同じ入力の前回送信が完了を確認できていません。自動では再送しません。手動で再試行できます。",
+                                     category='previous_attempt_unresolved')
+                raise CloudError("同じ入力は前回失敗済みです。自動では再送しません。手動で再試行できます。",
+                                 category='previous_attempt_failed')
             # An explicitly admitted retry reserves another complete attempt. The previous
             # failed/unknown request remains charged; never refund it to retry.
             # Proven-unsent attempts do not require retry authorization, but
@@ -478,18 +498,24 @@ def generate(messages, schema, *, model=None, timeout=180, retry_failed=False, v
         text = _output_text(response)
         result = validate(text)
         actual, usage = _actual_cost(response, model)
-        if actual is not None and actual > estimate:
-            # Never reduce an underestimated charge. Block all further spending.
-            actual = max(actual, budget)
         charged = estimate if actual is None else actual
+        if actual is not None and actual > estimate:
+            # Never reduce an underestimated charge. Block all further spending,
+            # but keep the measurement separate from that blocking charge.
+            charged = max(actual, budget)
         cached = {"output_text": text, "result": result, "usage": usage,
-                  "cost_usd": charged / NANODOLLARS, "usage_confirmed": actual is not None,
+                  "cost_usd": (estimate if actual is None else actual) / NANODOLLARS,
+                  "usage_confirmed": actual is not None,
                   "model": model, "provider": "openai", "cache_hit": False}
+        if actual is not None and charged > actual:
+            cached["budget_hold_usd"] = (charged - actual) / NANODOLLARS
+        settlement = {"state": "completed" if actual is not None else "completed_usage_unknown",
+                      "charged_nanodollars": charged, "usage": usage}
+        if actual is not None:
+            settlement["measured_nanodollars"] = actual
         with _locked_ledger() as ledger:
             _atomic_json(cache_path, cached)
-            ledger["requests"][identity].update(
-                state="completed" if actual is not None else "completed_usage_unknown",
-                charged_nanodollars=charged, usage=usage)
+            ledger["requests"][identity].update(settlement)
             _atomic_json(STATE_DIR / "cloud-budget.json", ledger)
         return {**cached, **budget_status()}
     except Exception as exc:

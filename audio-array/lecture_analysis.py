@@ -534,6 +534,7 @@ def analyze_snapshot(lines, previous=None, *, provider="local", model=None,
         block_translation_groups=request["block_translation_groups"])
     started = time.monotonic()
     local_inference_finished = False
+    local_dispatch_started = False
     try:
         if provider == "openai":
             import event_insights_cloud as cloud
@@ -565,6 +566,7 @@ def analyze_snapshot(lines, previous=None, *, provider="local", model=None,
                        "options": {"temperature": 0, "num_ctx": selected["context_tokens"],
                                    "num_predict": OUTPUT_TOKENS}}
             _save(directory, "payload.json", payload)
+            local_dispatch_started = True
             response = insights._local_chat(payload, timeout=timeout)
             # Once the synchronous local call returned, later validation/storage
             # failures must not be mistaken for a still-running Ollama request.
@@ -602,7 +604,9 @@ def analyze_snapshot(lines, previous=None, *, provider="local", model=None,
         return result
     except Exception as exc:
         # Preserve source/response evidence; never return a stale or synthetic result.
-        if local_inference_finished:
+        # Model selection, input limits and payload storage precede dispatch;
+        # those failures cannot leave a local request running.
+        if local_inference_finished or (provider != "openai" and not local_dispatch_started):
             exc.local_inference_finished = True
         try:
             _save(directory, "error.json", {"error_type": type(exc).__name__, "provider": provider,

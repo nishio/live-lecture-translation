@@ -87,7 +87,11 @@ def _request_json(path, payload=None, *, timeout=5):
     except (error.URLError, OSError) as exc:
         if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
             raise InsightsError("ローカルOllamaの応答がタイムアウトしました。") from exc
-        raise ModelUnavailableError("Mac内のOllamaに接続できません（127.0.0.1:11434）。") from exc
+        unavailable = ModelUnavailableError("Mac内のOllamaに接続できません（127.0.0.1:11434）。")
+        if isinstance(getattr(exc, "reason", exc), ConnectionRefusedError):
+            # A refused connection proves no request reached a model.
+            unavailable.local_inference_finished = True
+        raise unavailable from exc
     if len(raw) > MAX_RESPONSE_BYTES:
         raise InvalidResponseError("ローカルOllamaの応答がサイズ上限を超えました。")
     result = _parse_json(raw)
@@ -108,17 +112,25 @@ def _is_remote(value):
 def _local_chat(payload, *, timeout):
     """Hold one cooperative slot only during the local inference HTTP call."""
     check_processing_allowed()
+    dispatched = False
     try:
         with inference_slot("ollama", timeout=timeout, cancel=current_cancel_event()):
             check_processing_allowed()
+            dispatched = True
             return _request_json("/api/chat", payload, timeout=timeout)
     except (InferenceTimeout, InferenceCancelled) as exc:
         # Session cancellation is a paused operation, not a model failure or an
         # inference with unknown completion. Preserve unrelated slot failures.
         check_processing_allowed()
-        raise InsightsError("ローカル推論枠の待機が終了しました。再実行前に処理状態を確認してください。") from exc
+        failure = InsightsError("ローカル推論枠の待機が終了しました。再実行前に処理状態を確認してください。")
+        failure.__cause__ = exc
     except OSError as exc:
-        raise InsightsError("ローカル推論の排他状態を確認できません。推論は継続しません。") from exc
+        failure = InsightsError("ローカル推論の排他状態を確認できません。推論は継続しません。")
+        failure.__cause__ = exc
+    if not dispatched:
+        # The slot was never held for a request, so nothing reached the model.
+        failure.local_inference_finished = True
+    raise failure
 
 
 def _model_rank(model):

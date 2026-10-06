@@ -585,6 +585,14 @@ class SnapshotGenerationTest(unittest.TestCase):
             self.assertTrue(caught.exception.local_inference_finished)
             self.assertTrue(caught.exception.error_record_write_failed)
 
+    def test_local_failure_before_dispatch_is_marked_finished(self):
+        with patch.object(insights, "_select_model",
+                          side_effect=insights.ModelUnavailableError("synthetic unavailable")), \
+                patch.object(insights, "_local_chat", side_effect=AssertionError("sent")), \
+                self.assertRaises(insights.ModelUnavailableError) as caught:
+            analysis.analyze_snapshot([line()])
+        self.assertTrue(caught.exception.local_inference_finished)
+
     def test_local_timeout_is_not_marked_finished_but_response_validation_failure_is(self):
         with patch.object(insights, "_select_model", return_value=MODEL), \
                 patch.object(insights, "_local_chat", side_effect=TimeoutError("synthetic timeout")), \

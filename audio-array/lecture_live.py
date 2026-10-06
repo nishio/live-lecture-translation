@@ -1239,6 +1239,8 @@ class LectureApp:
             if session_id is not None and (not self.state['session'] or self.state['session']['id'] != session_id
                                            or self.result_dir != result_dir):
                 return  # A stale completion can never modify a successor session.
+            # History is durable before the result is published.
+            append_json(self.result_dir / 'analysis-history.jsonl', result)
             by_id = {line['id']: line for line in self.state['lines']}
             for item in result.get('translations', []):
                 if item['source_id'] in by_id:
@@ -1249,7 +1251,6 @@ class LectureApp:
                                    if key != 'translations'})
             self.state.setdefault('analysis_history', []).append(historical)
             self.state['analysis_history'] = self.state['analysis_history'][-60:]
-            append_json(self.result_dir / 'analysis-history.jsonl', result)
             newest_chunk = max((int(line['id'][1:7]) for line in lines), default=-1)
             ready = self.chunk_completed_at.get(newest_chunk)
             append_json(self.result_dir / 'measurements.jsonl', {'stage': 'analysis',
@@ -1496,8 +1497,8 @@ class LectureApp:
                 fingerprints.add(hashlib.sha256(encoded).hexdigest())
             entries = {key: row for key, row in adapter._load_ledger()['requests'].items()
                        if key not in baseline_keys and row.get('fingerprint', key) in fingerprints}
-            held = sum(row['charged_nanodollars'] for row in entries.values() if row['state'] != 'completed') / 1e9
-            confirmed = sum(row['charged_nanodollars'] for row in entries.values() if row['state'] == 'completed') / 1e9
+            confirmed = sum(adapter.confirmed_nanodollars(row) for row in entries.values()) / 1e9
+            held = sum(row['charged_nanodollars'] - adapter.confirmed_nanodollars(row) for row in entries.values()) / 1e9
             cost.update(confirmed_api_usd=confirmed, retained_reservation_usd=held,
                         additional_api_usd=confirmed if not held else None,
                         matching_request_count=len(entries), daily_budget=adapter.budget_status())
@@ -1761,15 +1762,21 @@ class LectureApp:
                             line['id'] = f"c{chunk['index']:06d}-l{index:04d}"
                             line['boundary_context'] = 'non-overlapping audio; incomplete sentences may need following speech'
                         with self.lock:
+                            # The transcript is durable before lines are published. A write
+                            # failure leaves this chunk failed and absent from state.
+                            append_json(self.result_dir / 'transcript.jsonl', {'chunk': chunk, 'lines': lines})
                             self.state['lines'].extend(lines)
                             self.state['asr'].update(state='waiting', through_seconds=chunk['end_seconds'])
-                            append_json(self.result_dir / 'transcript.jsonl', {'chunk': chunk, 'lines': lines})
-                            append_json(self.result_dir / 'measurements.jsonl', {'stage': 'asr',
-                                'through_seconds': chunk['end_seconds'], 'processing_seconds': time.monotonic() - began,
-                                'published_at': time.time(), 'capture_seconds': self.state['capture']['audio_seconds'],
-                                'source_chunk_completed_at': chunk.get('completed_at'),
-                                'chunk_ready_to_publication_seconds': (time.time() - chunk['completed_at']
-                                    if chunk.get('completed_at') else None), 'browser_render_measured': False})
+                            try:
+                                append_json(self.result_dir / 'measurements.jsonl', {'stage': 'asr',
+                                    'through_seconds': chunk['end_seconds'], 'processing_seconds': time.monotonic() - began,
+                                    'published_at': time.time(), 'capture_seconds': self.state['capture']['audio_seconds'],
+                                    'source_chunk_completed_at': chunk.get('completed_at'),
+                                    'chunk_ready_to_publication_seconds': (time.time() - chunk['completed_at']
+                                        if chunk.get('completed_at') else None), 'browser_render_measured': False})
+                            except OSError as exc:
+                                # The published chunk stays recognized; only its timing is missing.
+                                self.state['asr']['measurement_error'] = str(exc)[:1000]
                     except (ProcessingStopped, InferenceCancelled):
                         # It never entered inference; keep the exact audio chunk pending.
                         self.audio_queue.put(chunk)

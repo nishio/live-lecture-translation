@@ -370,6 +370,38 @@ class EventInsightsTest(unittest.TestCase):
                 {"models": [{"name": "renamed-local"}]}, {"capabilities": ["completion"]}]):
             self.assertFalse(insights.probe_model()["available"])
 
+    def test_only_refused_connection_proves_local_request_was_not_sent(self):
+        with patch.object(insights.request, "build_opener") as opener:
+            opener.return_value.open.side_effect = URLError(ConnectionRefusedError())
+            with self.assertRaises(insights.ModelUnavailableError) as refused:
+                insights._request_json("/api/chat", {"messages": []}, timeout=1)
+            opener.return_value.open.side_effect = ConnectionResetError()
+            with self.assertRaises(insights.ModelUnavailableError) as reset:
+                insights._request_json("/api/chat", {"messages": []}, timeout=1)
+        self.assertTrue(refused.exception.local_inference_finished)
+        self.assertFalse(getattr(reset.exception, "local_inference_finished", False))
+
+    def test_slot_wait_failure_is_finished_but_slot_release_failure_after_dispatch_is_not(self):
+        from local_inference import InferenceTimeout
+
+        def slot_timeout(*args, **kwargs):
+            raise InferenceTimeout("synthetic slot wait")
+        with patch.object(insights, "inference_slot", side_effect=slot_timeout), \
+                patch.object(insights, "_request_json", side_effect=AssertionError("sent")), \
+                self.assertRaises(insights.InsightsError) as waited:
+            insights._local_chat({"messages": []}, timeout=1)
+        self.assertTrue(waited.exception.local_inference_finished)
+
+        @contextmanager
+        def release_fails(*args, **kwargs):
+            yield
+            raise OSError("synthetic release failure")
+        with patch.object(insights, "inference_slot", side_effect=release_fails), \
+                patch.object(insights, "_request_json", return_value={"done": True}), \
+                self.assertRaises(insights.InsightsError) as released:
+            insights._local_chat({"messages": []}, timeout=1)
+        self.assertFalse(getattr(released.exception, "local_inference_finished", False))
+
     def test_network_timeout_is_clear_and_redirects_are_rejected(self):
         with patch.object(insights.request, "build_opener") as opener:
             opener.return_value.open.side_effect = URLError(TimeoutError())

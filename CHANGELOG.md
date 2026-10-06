@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Bundle the explicitly approved Audrey public lecture audio and generated 15/60-second playback data. Open it with `./demo.command` using Python standard-library modules only, without model setup or API access. Preserve source attribution, uncertainty, actual timing and failed requests while excluding private runtime/account data.
+- Keep local recognition running when Ollama refuses the connection or the local inference slot is never acquired; only an inference that may still be running pauses further local work.
+- Save recognized lines and analysis history before publishing them, so a failed write leaves the chunk failed and absent from the live state instead of disagreeing with saved evidence.
+- Record measured cost separately when an API charge exceeds its reservation. The whole daily budget is still held to block spending, but it is no longer reported as confirmed usage cost.
+- Label refusals of identical input after an earlier failed or unconfirmed attempt with their own categories. The deliberate no-automatic-resend rule is unchanged; manual retry remains available.
 
 ## 1.0.0 — 2026-10-06
 
