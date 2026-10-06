@@ -1,6 +1,19 @@
 # Version 1.0 release
 
-**Status: 1.0.0, 2026-10-06.** First stable release for Apple Silicon Macs, including independent cloud translation and analysis validated in the actual Audrey saved-audio demo. Installation, synthetic preparation/immediate-stop checks, fresh-process local startup trials and saved-audio cloud replays passed. Same-session recording pause/resume is not implemented; current-version real microphone/cloud acceptance remains a follow-up. Release approval does not mark those checks as passed. The `v0.9.0` baseline and running sessions remain unchanged.
+**Status: 1.0.1, 2026-10-06** ([patch release](#101-patch-release) of 1.0.0). First stable release for Apple Silicon Macs, including independent cloud translation and analysis validated in the actual Audrey saved-audio demo. Installation, synthetic preparation/immediate-stop checks, fresh-process local startup trials and saved-audio cloud replays passed. Same-session recording pause/resume is not implemented; current-version real microphone/cloud acceptance remains a follow-up. Release approval does not mark those checks as passed. The `v0.9.0` baseline and running sessions remain unchanged.
+
+## 1.0.1 patch release
+
+1.0.1 adds the bundled ready-to-play Audrey demo (`./demo.command`) and fixes found by the [whole-repository review](../wiki/review-2026-10-06.md):
+
+- Ollama connection refusals and other failures before local dispatch no longer pause recognition for the rest of the session.
+- Recognized lines and analysis history are saved before they are published.
+- When a measured API cost exceeds its reservation, it is recorded separately from the whole-budget hold.
+- Refusals to resend identical failed or unconfirmed input have dedicated categories.
+
+The 1.0.0 measurements and acceptance status below are unchanged. These fixes were checked with synthetic tests only.
+
+Release source identity: `44188d8424fe069b43cf7c4200f17db324532fccb9a8b2aaa2c1146198a633d5`, across 71 files. The method is the sorted-record method described below, including `config/lecture.example.json`. The two files added since 1.0.0 are `audio-array/lecture_demo_export.py` and its test. The method reproduces the 1.0.0 identity `f8502b86…` from the `v1.0.0` tag. Regression: 588 CPU-only Python tests ran in 121.255 seconds, with 586 passed and two opt-in native tests skipped. Both Node UI suites passed. No real capture, model inference or paid API request ran.
 
 ## Scope
 

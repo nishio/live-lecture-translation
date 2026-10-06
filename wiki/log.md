@@ -465,3 +465,9 @@ Implemented the high review items from [the review page](review-2026-10-06.md). 
 ## [2026-10-06] file back | Reviewer severity versus encoded policy
 
 Corrected the review page's first lesson. A reviewer reported the cross-session block of identical failed input as a high-severity defect. An existing test shows it is the deliberate no-automatic-resend rule, and the real gap was the generic refusal category. The reusable lesson is now: check a finding against tests that encode policy before treating it as a defect. Documentation only.
+
+## [2026-10-06] release | Version 1.0.1
+
+The user approved releasing the review fixes as 1.0.1. Updated VERSION, both READMEs and the changelog. Moved the bundled Audrey demo and the review fixes from Unreleased into 1.0.1, and added a patch-release section to the 1.0 release notes. The README demo ZIP link still points to the asset on the v1.0.0 release, because the demo code is unchanged by the fixes. Recomputed the source identity with the documented method, which first reproduced the 1.0.0 value from the tag. The 1.0.1 identity is `44188d8424fe069b43cf7c4200f17db324532fccb9a8b2aaa2c1146198a633d5` across 71 files.
+
+588 CPU-only Python tests passed with two opt-in native skips, and both Node UI suites passed. The 1.0.0 measurements and acceptance status are unchanged. No capture, inference or paid API request was performed.

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.1 — 2026-10-06
+
+Patch release after a whole-repository review: the bundled Audrey demo and fixes for local-failure handling, durable publication and cost reporting. No new capture, inference or paid API validation; see the [release notes](docs/release-1.0.md#101-patch-release).
 
 - Bundle the explicitly approved Audrey public lecture audio and generated 15/60-second playback data. Open it with `./demo.command` using Python standard-library modules only, without model setup or API access. Preserve source attribution, uncertainty, actual timing and failed requests while excluding private runtime/account data.
 - Keep local recognition running when Ollama refuses the connection or the local inference slot is never acquired; only an inference that may still be running pauses further local work.
