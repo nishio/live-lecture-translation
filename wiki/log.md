@@ -481,3 +481,7 @@ New verification and preview regressions fail on the previous source. Before run
 ## [2026-10-06] release | Version 1.0.2
 
 The user approved releasing 1.0.2 once CI passed. CI on `e305494` passed: Linux ran 592 tests with 12 expected skips, and macOS on Python 3.12 and 3.14 ran all 592 tests without skips. Updated VERSION, both READMEs and the changelog, and added a 1.0.2 section to the release notes. Source identity: `bce80a48ddea996ce5df277e0406badaef238f67afd0afac252f78e25fae63d2` across 71 files. No capture, inference or paid API request was performed.
+
+## [2026-10-06] file back | Skipped tests and patch-release practice
+
+Distilled the 1.0.1/1.0.2 work into a new engineering decision: [a skipped test is an unverified layer](engineering-decisions.md#a-skipped-test-is-an-unverified-layer). It covers per-platform CI that fails on skips, a skip-marker pattern that avoids false matches, the precondition for running native tests locally, and cutting patch releases only after CI passes on the candidate. Added the entry to the index. Documentation only.

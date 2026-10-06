@@ -160,6 +160,12 @@ Synthetic checks and a targeted translation comparison support their measured la
 
 On 2026-10-06, the user reviewed the actual Audrey demo with independent cloud stages and explicitly requested commit, push and the 1.0 release. Promote the accepted implementation by updating version metadata and publishing the stable tag; do not expand scope or restart the running demo. Same-session recording pause/resume and current-version real microphone/cloud acceptance remain documented follow-ups. Release approval is a scope decision, not evidence that an unperformed check passed. Retain the measured saved-audio results, failed attempts and unresolved charges, and preserve the v0.9.0 tag.
 
+## A skipped test is an unverified layer
+
+Before 1.0.2, CI reported success while 17 tests were skipped every time: launcher, recorded-media decoding and native capture. Their runner lacked zsh, ffmpeg and macOS. "OK (skipped=N)" therefore hid three never-exercised layers. Run each layer where its platform exists, and make any skip fail in that job. Elsewhere a skip may remain expected, but record it as such. Match unittest's skip markers (`... skipped`, `skipped=N`), not the bare word: test names such as `..._never_skipped` would otherwise fail the job. Native synthetic tests may run in CI and locally only because they never open a microphone. Locally, first confirm that no capture is running.
+
+Patch releases after 1.0.0 (1.0.1, 1.0.2) shipped review fixes verified only by synthetic tests. Release once CI passes on the candidate commit; the release commit then changes only version metadata and notes. Record the source identity, reproducing the previous release's identity from its tag first, together with CI's per-job test and skip counts. A patch release does not extend the 1.0.0 field measurements or acceptance status. See the [whole-repository review](review-2026-10-06.md) for the findings these releases addressed.
+
 ## Project license and source-material attribution
 
 The project uses [GNU AGPL version 3 only](../LICENSE) (`AGPL-3.0-only`), except where otherwise noted, following the user's 2026-10-05 license selection. Keep both README license sections consistent. The [Audrey sample](../samples/audrey-plurality-seoul-2023/README.md) retains the source material's CC BY attribution, uncertainty and transformation notices; the application license does not replace those terms. This change is recorded after the extracted v0.9.0 baseline without moving that tag.
