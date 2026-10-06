@@ -461,3 +461,7 @@ The user requested a whole-repository review. Four read-only reviewers covered c
 Implemented the high review items from [the review page](review-2026-10-06.md). Pre-dispatch local failures no longer pause recognition. Transcript and analysis history are written before they are published. Measured cost is kept separate from the budget-blocking charge. Refusals of identical input after an earlier failed or unconfirmed attempt have their own categories. The review's first item turned out to be a deliberate no-automatic-resend rule backed by an existing test, so that rule was kept. New regressions fail on the previous source, except the lifecycle contract test for an unreachable Ollama.
 
 588 CPU-only Python tests passed with two opt-in native skips, and both Node UI suites passed. No capture, model inference or paid API request was performed. The changes change the release source identity and belong after v1.0.0.
+
+## [2026-10-06] file back | Reviewer severity versus encoded policy
+
+Corrected the review page's first lesson. A reviewer reported the cross-session block of identical failed input as a high-severity defect. An existing test shows it is the deliberate no-automatic-resend rule, and the real gap was the generic refusal category. The reusable lesson is now: check a finding against tests that encode policy before treating it as a defect. Documentation only.
