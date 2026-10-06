@@ -2,18 +2,60 @@ name: CPU and UI tests
 on: [push, pull_request]
 permissions:
   contents: read
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  tests:
+  linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python -m pip install -r requirements-test.txt
+      # The pinned decoder from requirements.txt enables recorded-media tests.
+      - run: python -m pip install -r requirements-test.txt $(grep '^imageio-ffmpeg==' requirements.txt)
+      # Launcher (zsh) and native Swift tests skip here; the macOS job runs them.
       - run: python -m unittest discover -s audio-array/tests -v
+      - run: node audio-array/tests/test_lecture_ui.js
+      - run: node audio-array/tests/test_lecture_demo_ui.js
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the setup minimum; 3.14 is the clean-install release check.
+        python-version: ['3.12', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements-test.txt $(grep '^imageio-ffmpeg==' requirements.txt)
+      - run: zsh -n setup.command start.command demo.command
+      # Native tests build the Swift helper and use synthetic buffers only;
+      # they never open a microphone. Every test must run here: a skip fails.
+      - name: Python tests without skips
+        env:
+          LLT_RUN_NATIVE_TESTS: '1'
+        run: |
+          set -o pipefail
+          python -m unittest discover -s audio-array/tests -v 2>&1 | tee unittest.log
+          if grep -Eq '\.\.\. skipped|skipped=[0-9]' unittest.log; then
+            grep -E '\.\.\. skipped|skipped=[0-9]' unittest.log
+            echo 'Tests were skipped on macOS; every test must run in this job.'
+            exit 1
+          fi
       - run: node audio-array/tests/test_lecture_ui.js
       - run: node audio-array/tests/test_lecture_demo_ui.js

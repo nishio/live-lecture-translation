@@ -471,3 +471,9 @@ Corrected the review page's first lesson. A reviewer reported the cross-session 
 The user approved releasing the review fixes as 1.0.1. Updated VERSION, both READMEs and the changelog. Moved the bundled Audrey demo and the review fixes from Unreleased into 1.0.1, and added a patch-release section to the 1.0 release notes. The README demo ZIP link still points to the asset on the v1.0.0 release, because the demo code is unchanged by the fixes. Recomputed the source identity with the documented method, which first reproduced the 1.0.0 value from the tag. The 1.0.1 identity is `44188d8424fe069b43cf7c4200f17db324532fccb9a8b2aaa2c1146198a633d5` across 71 files.
 
 588 CPU-only Python tests passed with two opt-in native skips, and both Node UI suites passed. The 1.0.0 measurements and acceptance status are unchanged. No capture, inference or paid API request was performed.
+
+## [2026-10-06] fix | Review follow-up for verification, preview storage and CI coverage
+
+Implemented high review items 5–7 from [the review page](review-2026-10-06.md). Session verification now requires translation to be complete, with no pending targets, and reconciles translation blocks with their sources and history. Preview WAVs are removed after recognition, and their frame range and PCM hash are kept. Read-only measurement of existing sessions confirmed that previews took about twice the space of the recording itself. CI gains a macOS 3.12/3.14 job in which any skipped test fails. Data handling documents the preview removal; the changelog lists the changes as Unreleased.
+
+New verification and preview regressions fail on the previous source. Before running native tests locally, I confirmed that no capture process was running. 592 tests then ran on macOS without skips, and both Node UI suites passed. No capture, model inference or paid API request was performed.
