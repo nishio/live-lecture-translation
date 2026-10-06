@@ -29,7 +29,8 @@ def storage_check(path):
     if not os.access(parent, os.W_OK):
         return {'id': 'storage', 'label': '音声の保存先', 'state': 'blocked',
                 'message': '保存先に書き込めません。'}
-    # Six hours of raw PCM plus chunk WAVs is about 1.4 GB. Leave headroom
+    # Six hours of raw PCM plus chunk WAVs is about 1.4 GB. Provisional preview
+    # WAVs are removed after recognition and are not part of it. Leave headroom
     # for source copies, transcripts, and safe shutdown; do not fill the disk.
     if free < 2 * 1024 ** 3:
         return {'id': 'storage', 'label': '音声の保存先', 'state': 'blocked',

@@ -1669,13 +1669,13 @@ class LectureApp:
             language = self.state['session']['language']
             self.state['provisional_asr']['state'] = 'running'
         started_at, before = time.time(), time.monotonic()
+        preview_path = session_dir / 'provisional' / f"preview-{job['revision']:06d}.wav"
         try:
             with processing_scope(job['stop_event']):
                 check_processing_allowed()
                 self.persist(force=True)
                 check_processing_allowed()
-                chunk = write_window(session_dir / 'audio/raw.pcm',
-                    session_dir / 'provisional' / f"preview-{job['revision']:06d}.wav", job)
+                chunk = write_window(session_dir / 'audio/raw.pcm', preview_path, job)
                 check_processing_allowed()
                 report = self.transcriber(chunk, result_dir / 'provisional-asr' / f"{job['revision']:06d}.json", language)
             lines = build_lines({'segments': [{'index': chunk['index'], 'start_seconds': chunk['start_seconds']}]},
@@ -1684,7 +1684,11 @@ class LectureApp:
                 line['id'] = f"p{job['revision']:06d}-l{index:04d}"
                 line['boundary_context'] = 'revisable rolling recognition; not translation source evidence'
             event = {key: job[key] for key in ('revision', 'window_start_seconds', 'through_seconds', 'ready_at')}
-            event.update(started_at=started_at, lines=lines)
+            # The preview WAV is a copy of saved raw PCM and is removed below;
+            # the frame range and hash let it be re-derived from raw.pcm.
+            event.update(started_at=started_at, lines=lines,
+                         audio={'start_frame': chunk['start_frame'], 'end_frame': chunk['end_frame'],
+                                'pcm_sha256': chunk['pcm_sha256'], 'wav_retained': False})
             with self.lock:
                 if not self.state['session'] or self.state['session']['id'] != session_id:
                     return False
@@ -1693,7 +1697,8 @@ class LectureApp:
                 append_json(result_dir / 'measurements.jsonl', {key: value for key, value in
                     {**event, 'stage': 'provisional_asr', 'capture_seconds': self.state['capture']['audio_seconds'],
                      'browser_render_measured': False}.items() if key != 'lines'})
-                self.state['provisional_asr'].update({key: value for key, value in event.items() if key != 'processing_seconds'},
+                self.state['provisional_asr'].update({key: value for key, value in event.items()
+                                                     if key not in {'processing_seconds', 'audio'}},
                                                     state='completed', error=None)
         except (ProcessingStopped, InferenceCancelled):
             with self.lock:
@@ -1708,6 +1713,13 @@ class LectureApp:
                     'revision': job['revision'], 'window_start_seconds': job['window_start_seconds'],
                     'through_seconds': job['through_seconds'], 'at': time.time(), 'error': str(exc)[:1000]})
         finally:
+            try:
+                # Previews accumulate at several times the raw audio rate.
+                preview_path.unlink(missing_ok=True)
+            except OSError as exc:
+                with self.lock:
+                    append_json(result_dir / 'provisional-events.jsonl', {'event': 'preview_audio_not_removed',
+                        'revision': job['revision'], 'at': time.time(), 'error': str(exc)[:1000]})
             self.persist(force=True)
         return True
 

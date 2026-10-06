@@ -249,8 +249,28 @@ class ProvisionalTest(unittest.TestCase):
         app._process()
         self.assertEqual('completed', app.state['asr']['state'])
         self.assertEqual('failed', app.state['provisional_asr']['state'])
+        self.assertEqual([], list((app.session_dir / 'provisional').glob('*.wav')))
         self.assertIn('一部に失敗', app.state['message'])
         self.assertEqual([], app.state['asr']['failed_chunks'])
+
+    def test_preview_audio_is_removed_after_recognition_but_stays_derivable(self):
+        seen = []
+
+        def transcribe(chunk, *args):
+            seen.append(Path(chunk['path']).is_file())
+            return fake_asr(chunk, *args)
+        app = self.prepared_app(transcriber=transcribe)
+        self.capture(app, 6)
+        app._process_provisional()
+        self.assertEqual([True], seen)
+        self.assertEqual([], list((app.session_dir / 'provisional').glob('*')))
+        event = json.loads((app.result_dir / 'provisional-history.jsonl').read_text())
+        audio = event['audio']
+        self.assertEqual((0, 6 * RATE, False), (audio['start_frame'], audio['end_frame'], audio['wav_retained']))
+        raw = (app.session_dir / 'audio/raw.pcm').read_bytes()[audio['start_frame'] * 2:audio['end_frame'] * 2]
+        import hashlib
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), audio['pcm_sha256'])
+        self.assertNotIn('audio', app.state['provisional_asr'])
 
     def test_stop_before_dispatch_and_after_persist_do_not_infer(self):
         app = self.prepared_app()

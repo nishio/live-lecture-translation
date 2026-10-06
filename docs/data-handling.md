@@ -4,6 +4,8 @@
 
 The normal microphone workflow records audio locally and runs recognition locally. Optional cloud translation and analysis send recognized text and selected transcript context. The application also preserves generated text and evidence needed to diagnose a request.
 
+Revisable preview recognition copies a trailing window of saved PCM to a temporary WAV. The WAV is removed once its recognition returns or fails. Its frame range and PCM hash stay in `provisional-history.jsonl`, so the window can be re-derived from `raw.pcm`. Sessions recorded with 1.0.1 or earlier keep their preview WAVs; nothing deletes existing session files.
+
 Private recordings are not distributed. The user explicitly authorized the [Audrey public demo](../samples/audrey-plurality-seoul-2023/demo/README.md), including its public lecture WAV and generated playback export, on 2026-10-06. It retains source attribution and the CC BY notice. Historical private-session measurement summaries remain separate from their original artifacts.
 
 ## Use a publication allowlist

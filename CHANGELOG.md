@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `lecture_verify` no longer reports a session as `verified_complete` while translation is failed, paused or still has untranslated targets. It also checks that translation blocks cite existing, non-overlapping source lines and match the saved translation history.
+- Remove each provisional preview WAV after its recognition returns or fails. Previously these copies used about twice the disk space of the recording itself (40 MB against 20 MB in the 325-second Audrey run), outside the startup storage estimate. The frame range and PCM hash stay in the preview history; existing session files are not deleted.
+
 ## 1.0.1 — 2026-10-06
 
 Patch release after a whole-repository review: the bundled Audrey demo and fixes for local-failure handling, durable publication and cost reporting. No new capture, inference or paid API validation; see the [release notes](docs/release-1.0.md#101-patch-release).
